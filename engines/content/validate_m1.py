@@ -42,7 +42,50 @@ def _load_dotenv(path=".env") -> None:
         pass
 
 
+def _load_runtime_contract() -> None:
+    """Load the AI Runtime contract (AI_RUNTIME_*) for local validation.
+
+    In production the EOS Worker runs INSIDE the runtime and inherits these vars.
+    For local validation we load them from the Runtime v1 (Hermes) profile's .env
+    if not already present in the environment. CLI/CI can override via env or .env.
+    Nothing here is ever committed (the profile .env is gitignored, and we only read).
+    """
+    if os.environ.get("AI_RUNTIME_BASE_URL") and os.environ.get("AI_RUNTIME_API_KEY"):
+        return  # env already wins (mock or real runtime)
+    import glob
+    home = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+    candidates = glob.glob(os.path.join(home, "hermes", "profiles", "*", ".env"))
+    for p in candidates:
+        try:
+            for line in open(p, encoding="utf-8"):
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                if k.strip().startswith("AI_RUNTIME"):
+                    os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+        except OSError:
+            continue
+
+
+def _drain_all() -> int:
+    """Hermetic reset: remove any (content,score) rows left by prior runs.
+
+    Returns the number of queue rows removed. Keeps the validation reproducible.
+    """
+    removed = 0
+    for table in ("content_engine_runs", "content_engine_dlq", "content_engine_queue"):
+        r = requests.delete(
+            f"{url}/rest/v1/{table}?engine=eq.{ENGINE}&stage=eq.{STAGE}",
+            headers={**hdr, "Prefer": "return=representation"}, timeout=30,
+        )
+        if r.status_code < 400:
+            removed += len(r.json())
+    return removed
+
+
 _load_dotenv()
+_load_runtime_contract()
 
 ENGINE, STAGE = "content", "score"
 url = os.environ.get("SUPABASE_URL")
@@ -53,18 +96,10 @@ hdr = {"Authorization": f"Bearer {key}", "apikey": key}
 
 results = {}
 
-# ---- Hermetic setup: drain stale pending jobs so the Worker claims OUR job ----
-_stale = requests.get(
-    f"{url}/rest/v1/content_engine_queue?engine=eq.{ENGINE}&stage=eq.{STAGE}"
-    f"&status=eq.pending&select=id",
-    headers=hdr, timeout=30,
-).json()
-if _stale:
-    requests.delete(
-        f"{url}/rest/v1/content_engine_queue?engine=eq.{ENGINE}&stage=eq.{STAGE}&status=eq.pending",
-        headers={**hdr, "Prefer": "return=representation"}, timeout=30,
-    )
-    results["drained_stale_pending"] = len(_stale)
+# ---- Hermetic setup: drain all prior (content,score) rows so the Worker sees ONLY our job ----
+_drained = _drain_all()
+if _drained:
+    results["drained_prior_rows"] = _drained
 
 # ---- C1: enqueue a real, provider-agnostic job ----
 jid = ce_queue.enqueue(ENGINE, STAGE, {
@@ -80,6 +115,7 @@ DRIVER = os.path.join(os.path.dirname(_HERE), "lib", "run_score_stage.py")
 r = __import__("subprocess").run([sys.executable, DRIVER],
                                  cwd=os.path.dirname(_HERE), capture_output=True, text=True)
 results["C3_worker_stdout"] = r.stdout.strip()
+results["C3_worker_stderr"] = r.stderr.strip()
 results["C3_worker_rc"] = r.returncode
 
 qr = requests.get(f"{url.rstrip('/')}/rest/v1/content_engine_queue?id=eq.{jid}&select=status,attempts",
@@ -94,6 +130,18 @@ results["C4_structured_json"] = rr[0]["result_json"] if rr else None
 results["C8_run_status"] = rr[0]["status"] if rr else None
 results["C8_source_url"] = rr[0]["source_url"] if rr else None
 
+# ---- M1: the persisted result is STRICT JSON conforming to the frozen contract ----
+if rr:
+    rj = rr[0]["result_json"] or {}
+    results["M1_result_is_strict_json"] = isinstance(rj, dict)
+    results["M1_keys_valid"] = (
+        all(k in rj for k in ("score", "category", "decision", "rationale"))
+        and isinstance(rj.get("score"), int) and 0 <= rj["score"] <= 10
+        and rj.get("category") in ("product", "industry", "competitor", "research", "opinion", "noise")
+        and rj.get("decision") in ("approve", "reject")
+        and isinstance(rj.get("rationale"), str) and len(rj["rationale"]) <= 280
+    )
+
 # ---- M2: prove the scoring was produced by genuine AI Runtime reasoning ----
 if rr:
     rj = rr[0]["result_json"] or {}
@@ -104,7 +152,8 @@ if rr:
         k in rj for k in ("score", "category", "decision", "rationale")
     ) and rj.get("decision") in ("approve", "reject")
 
-# ---- C7: failure path routes to DLQ ----
+# ---- C7: failure path routes to DLQ (hermetic: drain again so OUR bad job is claimed) ----
+_drain_all()
 jid_bad = ce_queue.enqueue(ENGINE, STAGE, {"title": "bad item", "source_url": "https://x/bad"},
                            max_attempts=1)
 job = ce_queue.claim(ENGINE, STAGE)
