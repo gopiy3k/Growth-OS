@@ -1,0 +1,6 @@
+{
+  "sources": [
+    { "id": "hn-frontpage", "url": "https://hnrss.org/frontpage" },
+    { "id": "bbc-news", "url": "https://feeds.bbci.co.uk/news/rss.xml" }
+  ]
+}

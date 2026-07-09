@@ -212,6 +212,33 @@ def last_run(stage: str) -> Optional[dict[str, Any]]:
     return r.json()[0] if r.status_code == 200 and r.json() else None
 
 
+def is_source_known(source_url: str) -> bool:
+    """Engine-owned dedup decision, executed via platform transport.
+
+    Returns True if the canonical `source_url` already exists in
+    `content_engine_queue`, `content_engine_runs`, or `content_engine_dlq`.
+    Engine Producers call this to avoid enqueueing duplicate work. The *decision*
+    (what counts as "known") is engine policy; the *query* is platform transport.
+    """
+    url = _base()
+    h = _get_headers()
+    checks = (
+        ("content_engine_queue", "payload_json->>source_url"),
+        ("content_engine_runs", "source_url"),
+        ("content_engine_dlq", "payload_json->>source_url"),
+    )
+    for tbl, col in checks:
+        r = requests.get(
+            f"{url}/{tbl}",
+            headers=h,
+            params={col: f"eq.{source_url}", "select": "id"},
+            timeout=30,
+        )
+        if r.status_code == 200 and r.json():
+            return True
+    return False
+
+
 def _get_job(job_id: str) -> Optional[dict[str, Any]]:
     url = _base()
     r = requests.get(f"{url}/content_engine_queue?id=eq.{job_id}&select=*",
