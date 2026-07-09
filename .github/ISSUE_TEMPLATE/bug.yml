@@ -1,0 +1,25 @@
+name: 🐛 Bug report
+description: Report a defect in Growth OS
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Include commands, env vars (no secrets), and the failing assertion.
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: OS, Python version, runtime used (mock / Hermes / other).
+    validations:
+      required: false

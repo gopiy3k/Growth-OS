@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Growth OS AI Runtime Capability Contracts",
+  "description": "Source of truth for business-capability output contracts. Bump `contract` on any capability schema change.",
+  "type": "object",
+  "contract": 1,
+  "capabilities": {
+    "score_content": {
+      "description": "Editorial scoring of one external content item.",
+      "input": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string" },
+          "content": { "type": "string" },
+          "source_url": { "type": "string" },
+          "source_type": { "type": "string", "enum": ["rss", "reddit", "youtube", "github", "other"] }
+        },
+        "required": ["title"]
+      },
+      "output": {
+        "type": "object",
+        "properties": {
+          "score": { "type": "integer", "minimum": 0, "maximum": 10 },
+          "category": { "type": "string", "enum": ["product", "industry", "competitor", "research", "opinion", "noise"] },
+          "decision": { "type": "string", "enum": ["approve", "reject"] },
+          "rationale": { "type": "string", "maxLength": 280 }
+        },
+        "required": ["score", "category", "decision", "rationale"]
+      }
+    }
+  }
+}

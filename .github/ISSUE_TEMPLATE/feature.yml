@@ -1,0 +1,30 @@
+name: ✨ Feature / engine / capability
+description: Propose a new feature, engine, or AI Runtime capability
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Type
+      options:
+        - New engine
+        - New capability (AI Runtime verb)
+        - New runtime implementation
+        - Platform feature
+        - Docs
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What and why. If a capability, describe the input/output contract.
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Contract impact
+      description: Does this change the queue API or AI Runtime contract? If so, how?
+    validations:
+      required: false

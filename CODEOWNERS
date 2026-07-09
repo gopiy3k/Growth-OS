@@ -1,0 +1,11 @@
+[main]
+# Owners team — replace with your GitHub username/team before first release.
+* @gopisuresh
+
+; Engine execution platform
+/engines/        @gopisuresh
+/migrations/     @gopisuresh
+/runtime/        @gopisuresh
+
+; Architecture decisions
+/docs/adr/       @gopisuresh
