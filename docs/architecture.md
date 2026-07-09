@@ -33,9 +33,11 @@ job source ──▶ durable queue (jobs + DLQ) ──▶ Worker (claim → reas
 
 ## Engine-agnostic by design
 
-The queue contract is generic: `engine` + `stage` + `payload_json`. The Content engine's `score`
-stage is the reference implementation; GEO, Prospect, Analytics, and others reuse the same spine
-with their own engine id and skill.
+The queue contract is generic: `engine` + `stage` + `payload_json`. The Content engine hosts
+`score`, `generate`, `review`, and `publish` stages on the same spine, plus the deterministic
+**Selection** mechanism (EOM §8, not a stage), with its **Approved Pool** as a logical view over
+`content_engine_runs`. GEO, Prospect, Analytics, and others reuse the same spine with their own
+engine id and skill.
 
 ## Runtime-agnostic by design
 

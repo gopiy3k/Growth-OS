@@ -29,10 +29,17 @@ component, scheduler, or abstraction.
 |---|---|---|---|
 | **Primitives** | Platform (reused) | `Producer`, `Queue`, `Stage` | Single source of truth in `engines/_shared/eos_queue.py`. |
 | **Declaration** | Engine | `Business Capability`, `Outcome` | The engine's stated intent and the terminal result. |
-| **Policy** | Engine (config) | cadence, thresholds, sources, caps, retry, backlog | Engine-owned; mechanism stays in the EOS. |
+| **Policy** | Engine (config) | cadence, thresholds, sources, caps, retry, backlog, **Selection algorithm**, **Approved Pool TTL/freshness/ranking weights** | Engine-owned config; mechanism stays in the EOS. Lives in `engines/content/config/policy.json`. |
 
-Logic that belongs to the engine (e.g., dedup *decision*) lives in engine code; the
-platform provides the *query* (e.g., `eos_queue.is_source_known`).
+**Three-way ownership split (ADR-026 §8):** (a) **Growth OS platform (EOS)** owns the
+*mechanism* — scheduler, workers, queue, runs, retry, DLQ, runtime contract. (b) **The
+Content Engine** (in the Growth OS repo, engine-owned config) owns the *Policy values* — cadence,
+caps, thresholds, TTL, freshness/ranking weights, duplicate window, and the Selection algorithm.
+(c) **AIVIS** owns the *product intent* — content strategy, pillars, brand voice, trust rules,
+audience, positioning, publishing philosophy — including the business rationale for caps/cadence.
+
+Logic that belongs to the engine (e.g., dedup *decision*, Selection *algorithm*) lives in engine
+code; the platform provides the *query* (e.g., `eos_queue.is_source_known`).
 
 ---
 
@@ -65,6 +72,10 @@ not its Outcome and not a capability tuple.
 | `Producer` | **NOT a Stage.** Discovers/creates work, then enqueues. Never claims, completes, or writes `runs`. |
 | `Queue` | Platform transport (ADR-021). Engine decides dedup *policy*; platform owns the dedup *query*. |
 | `Stage` | Transforms **one job type**. Only the **terminal Stage** may declare the `Outcome`. |
+| `Review` (Content) | A **Stage** (ADR-026). Transforms one draft; pressure-tests it for safety/factual integrity. Runs in the SAME `engine-content` Runtime Context as Score/Generate — differs only by Stage/Skill/Prompt/Contract. Treats Generate output as **untrusted**. |
+| `Selection` (Content) | **NOT a Stage.** The §8 operational mechanism. Deterministic, engine-internal, Policy-driven; owns NO AI reasoning. Reads the Approved Pool and enqueues `publish`. |
+| `Pending Review` | A job with `stage="review"` and `status="pending"`. **Not** a new queue status. |
+| `Approved Pool` | A **logical view** over `content_engine_runs` (review runs with `approved=true`, not yet published, not expired). No new table. |
 | Division of ownership | `Platform` owns execution mechanism; `Engine` owns business behavior; `Runtime` owns reasoning (ADR-022). |
 
 ---
@@ -124,12 +135,17 @@ This invariant is mandatory for all future Growth OS engines.
 
 ## 8. Operational layer (engine-internal, no new EOS component)
 
-- The operational layer (discover / cadence / caps / dedup) is **engine-internal
-  policy** built on the frozen primitives. **No new EOS component** is introduced.
-- **Mechanism** (scheduling, retries, DLQ) is owned by the EOS. **Policy** (what to
-  schedule, caps, thresholds, sources) is owned by the engine.
+- The operational layer (discover / cadence / caps / dedup / **Selection** / **Approved
+  Pool**) is **engine-internal policy** built on the frozen primitives. **No new EOS
+  component** is introduced.
+- **Mechanism** (scheduling, retries, DLQ, queue, runs) is owned by the EOS. **Policy**
+  (what to schedule, caps, thresholds, sources, TTL, freshness/ranking weights, duplicate
+  window, Selection algorithm) is owned by the engine (see `engines/content/config/policy.json`).
+- **Selection** is the canonical §8 mechanism: deterministic, engine-internal, Policy-driven,
+  owning NO AI reasoning. It reads the Approved Pool and enqueues `publish` for winners. It is
+  **NOT** a Stage, Runtime, EOS component, Queue, or Worker (ADR-026 §7).
 - **Health metrics** (queue depth, retry rate, DLQ count) are platform-owned.
-  **Business metrics** (publications, accepted scores, published count) are
+  **Business metrics** (publications, accepted scores, published count, pool depth) are
   engine-owned.
 
 ---
@@ -147,5 +163,8 @@ This invariant is mandatory for all future Growth OS engines.
 - `docs/adr/ADR-022-ai-runtime-boundary.md`
 - `docs/adr/ADR-023-growth-os-open-source-boundary.md`
 - `docs/adr/ADR-024-engine-operating-model.md`
+- `docs/adr/ADR-026-content-engine-review-selection.md`
 - `docs/architecture.md`
+- `engines/content/config/policy.json` (engine Policy values)
+- `engines/content/lib/selection.py` (§8 Selection algorithm, pure)
 - `engines/README.md` (extension points)

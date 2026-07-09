@@ -16,18 +16,39 @@ engine is adding a new `engine` id and (optionally) new `stage` values — no ch
 ## Reference engine: `content`
 
 `engines/content` is the proven reference implementation (validated live end-to-end). It has
-**two independent stages** on the same engine — `score` and `generate` — both reusing the
-identical EOS spine. This proves one engine can host multiple stages with zero EOS changes.
+**four stages** on the same engine — `score`, `generate`, `review`, and `publish` — plus the
+**Selection** mechanism (a §8 operational mechanism, NOT a stage), all reusing the identical EOS
+spine and the same `engine-content` Runtime Context. This proves one engine can host multiple
+stages with zero EOS changes.
 
 | Path | Role |
 |---|---|
 | `engines/_shared/eos_queue.py` | **Shared** queue/DLQ/runs client. Single source of truth. Do not duplicate. |
 | `engines/content/lib/run_score_stage.py` | Worker driver for the `content`/`score` stage: `claim → reason_item → complete/fail`. |
-| `engines/content/lib/run_generate_stage.py` | Worker driver for the `content`/`generate` stage (second stage, same spine, zero EOS changes). |
+| `engines/content/lib/run_generate_stage.py` | Worker driver for the `content`/`generate` stage (enqueues `review`, not `publish`). |
+| `engines/content/lib/run_review_stage.py` | Worker driver for the `content`/`review` stage (ADR-026): pressure-tests the draft in the SAME Runtime Context; treats Generate output as untrusted; enforces the frozen review contract. |
+| `engines/content/lib/selection.py` | **Pure** deterministic Selection algorithm (the §8 mechanism). No I/O, no AI. |
+| `engines/content/lib/pool_client.py` | Engine-owned Approved Pool read/writes over `content_engine_runs` (logical view, no new table). |
+| `engines/content/lib/run_select.py` | Selection driver (§8 mechanism): reads the pool, runs `selection.select()`, enqueues `publish` for winners. NOT a stage. |
+| `engines/content/lib/run_publish_stage.py` | Worker driver for the `content`/`publish` stage (terminal; real Buffer). Created ONLY by Selection. |
+| `engines/content/config/policy.json` | Engine Policy values (cadence, caps, TTL, ranking weights, starvation behaviour). |
 | `engines/content/skills/score-content-source/SKILL.md` | Skill executed by the Worker (the `score` reasoning contract). |
 | `engines/content/skills/generate-content-post/SKILL.md` | Skill executed by the Worker (the `generate` reasoning contract). |
+| `engines/content/skills/review-content-post/SKILL.md` | Skill executed by the Worker (the `review` reasoning contract). |
 | `engines/content/validate_m1.py` | Hermetic validation harness for the `score` stage. |
-| `engines/content/validate_content_generate.py` | Hermetic validation harness for the `generate` stage (proves one engine, many stages). |
+| `engines/content/validate_content_generate.py` | Hermetic validation harness for the `generate` stage. |
+| `engines/content/validate_content_review.py` | Hermetic validation harness for the `review` stage (real Runtime pressure-test). |
+| `engines/content/validate_content_select.py` | Hermetic harness for the pure Selection algorithm (deterministic, no network). |
+
+**Content Engine chain (frozen architecture, ADR-026):**
+
+```
+Producer → Score → Generate → [review job: pending] → Review → Approved Pool → Selection → Publish
+```
+
+`Pending Review` is a `review` job in `pending` (no new status). `Review` and `Generate` share
+one Runtime Context; they differ only by Stage/Skill/Prompt/Contract. `Selection` is deterministic
+engine-internal Policy (§8), not a stage. `Publish` is created only by Selection.
 
 ## Adding a new engine (M3 and beyond)
 
