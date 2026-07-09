@@ -15,14 +15,19 @@ engine is adding a new `engine` id and (optionally) new `stage` values — no ch
 
 ## Reference engine: `content`
 
-`engines/content` is the proven reference implementation (validated live end-to-end).
+`engines/content` is the proven reference implementation (validated live end-to-end). It has
+**two independent stages** on the same engine — `score` and `generate` — both reusing the
+identical EOS spine. This proves one engine can host multiple stages with zero EOS changes.
 
 | Path | Role |
 |---|---|
 | `engines/_shared/eos_queue.py` | **Shared** queue/DLQ/runs client. Single source of truth. Do not duplicate. |
 | `engines/content/lib/run_score_stage.py` | Worker driver for the `content`/`score` stage: `claim → reason_item → complete/fail`. |
-| `engines/content/skills/score-content-source/SKILL.md` | Skill executed by the Worker (the reasoning contract). |
-| `engines/content/validate_m1.py` | Hermetic end-to-end validation harness (enqueue → claim → reason → persist → DLQ). |
+| `engines/content/lib/run_generate_stage.py` | Worker driver for the `content`/`generate` stage (second stage, same spine, zero EOS changes). |
+| `engines/content/skills/score-content-source/SKILL.md` | Skill executed by the Worker (the `score` reasoning contract). |
+| `engines/content/skills/generate-content-post/SKILL.md` | Skill executed by the Worker (the `generate` reasoning contract). |
+| `engines/content/validate_m1.py` | Hermetic validation harness for the `score` stage. |
+| `engines/content/validate_content_generate.py` | Hermetic validation harness for the `generate` stage (proves one engine, many stages). |
 
 ## Adding a new engine (M3 and beyond)
 
