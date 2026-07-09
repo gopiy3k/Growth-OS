@@ -19,3 +19,15 @@ dist/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local engineering log (mandatory discipline artifact - NEVER committed)
+engineering_log.md
+
+# Local debug/validation scratch artifacts (never committed)
+.buffer_discovered.json
+gen_out.txt
+pub_out.json
+pub_err.txt
+
+# Validation scratch outputs (never committed)
+e2e_out.json
