@@ -1,0 +1,33 @@
+{
+  "policy_version": "1",
+  "selection_algorithm_version": "1",
+  "review_contract_version": "1",
+  "prompt_version": "1",
+
+  "business_capability": "Continuous Content Production",
+
+  "publish_time": "09:00",
+  "timezone": "Asia/Kolkata",
+  "publish_top_per_day": 1,
+  "max_posts_per_week": 7,
+  "min_safe_score": 70,
+
+  "starvation_behaviour": "publish_best_safe",
+  "pause_flag": false,
+
+  "pool_ttl_hours": 168,
+  "pool_max_size": 50,
+  "evergreen_ttl_hours": 720,
+
+  "freshness_halflife_hours": 48,
+
+  "duplicate_window_days": 7,
+  "max_per_category_per_week": 3,
+
+  "ranking_weights": {
+    "overall_score": 0.6,
+    "freshness": 0.25,
+    "evergreen": 0.15,
+    "diversity_penalty": 0.2
+  }
+}

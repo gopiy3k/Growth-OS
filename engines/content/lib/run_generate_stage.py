@@ -162,7 +162,21 @@ def main() -> int:
     try:
         result = reason_item(payload)
         ce_queue.complete(job_id, result, source_url=source_url)
-        print(f"[generate] completed job {job_id} -> {result}")
+        # Chain (ADR-026): a successful generate enqueues the REVIEW stage — NOT publish.
+        # The draft is untrusted input to Review, which pressure-tests it. Publish jobs are
+        # created ONLY by the Selection mechanism (EOM §8) from the Approved Pool.
+        # This produces the "Pending Review" job: stage="review", status="pending".
+        ce_queue.enqueue(
+            ENGINE, "review",
+            {
+                "source_url": source_url,
+                "draft_title": result.get("draft_title", ""),
+                "draft_body": result.get("draft_body", ""),
+                "tone": result.get("tone", ""),
+                "generated_from": payload,
+            },
+        )
+        print(f"[generate] completed job {job_id} -> {result} (enqueued review)")
         return 0
     except Exception as e:  # noqa: BLE001
         err = f"{type(e).__name__}: {e}"[:500]
