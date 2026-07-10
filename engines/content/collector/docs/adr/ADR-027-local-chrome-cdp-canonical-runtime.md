@@ -135,33 +135,6 @@ remained.
 
 ---
 
-## 7. Browser Runtime boundaries
-
-**Inside the browser runtime (infrastructure) — NOT the collector's concern:**
-- Browser runtime selection (local Chrome via CDP).
-- Browser profile strategy (dedicated `--user-data-dir`).
-- CDP configuration (`browser.cdp_url`, port 9333).
-- Authentication (manual one-time X login; cookie persistence).
-- Login / OTP / verification flows.
-- Browser Use Cloud lifecycle (kept dormant, Electron running).
-- The "new automation tab" rule enforcement.
-
-**Inside the Grok Trend Intelligence Collector (application) — begins only after attach:**
-1. Open a fresh automation tab.
-2. Navigate directly to **`https://x.com/i/grok`** (the canonical Grok endpoint — see §6.1). Do NOT use `grok.com` unless a separate runtime architecture is explicitly authorized.
-3. Submit research prompts.
-4. Wait for completion.
-5. Extract the complete response.
-6. Preserve evidence.
-7. Normalize the output.
-8. Store the result.
-9. Close only the automation tab.
-
-**The collector must NOT:** authenticate, manage browser profiles, change CDP
-configuration, handle login flows, or modify browser runtime behaviour.
-
----
-
 ## 6.1 Canonical Grok endpoint (ADR-027 amendment, 2026-07-11)
 
 The authenticated X session is established and persisted on the X profile
@@ -189,6 +162,33 @@ Attach to local Chrome (CDP :9333)
   real X login cookies; a tab at `grok.com` did NOT).
 - `grok.com` is **not** used unless the PO explicitly authorizes a separate
   runtime architecture.
+
+---
+
+## 7. Browser Runtime boundaries
+
+**Inside the browser runtime (infrastructure) — NOT the collector's concern:**
+- Browser runtime selection (local Chrome via CDP).
+- Browser profile strategy (dedicated `--user-data-dir`).
+- CDP configuration (`browser.cdp_url`, port 9333).
+- Authentication (manual one-time X login; cookie persistence).
+- Login / OTP / verification flows.
+- Browser Use Cloud lifecycle (kept dormant, Electron running).
+- The "new automation tab" rule enforcement.
+
+**Inside the Grok Trend Intelligence Collector (application) — begins only after attach:**
+1. Open a fresh automation tab.
+2. Navigate directly to **`https://x.com/i/grok`** (the canonical Grok endpoint — see §6.1). Do NOT use `grok.com` unless a separate runtime architecture is explicitly authorized.
+3. Submit research prompts.
+4. Wait for completion.
+5. Extract the complete response.
+6. Preserve evidence.
+7. Normalize the output.
+8. Store the result.
+9. Close only the automation tab.
+
+**The collector must NOT:** authenticate, manage browser profiles, change CDP
+configuration, handle login flows, or modify browser runtime behaviour.
 
 ---
 
