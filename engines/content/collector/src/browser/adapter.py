@@ -7,7 +7,7 @@ without touching orchestration.
 
 This layer contains NO collector logic: no prompts, no normalization, no storage,
 no scheduling, no OD/EB/Publishing. It is a thin, clean abstraction over the
-frozen Browser Runtime (ADR-024).
+frozen Browser Runtime (ADR-027).
 """
 
 from __future__ import annotations

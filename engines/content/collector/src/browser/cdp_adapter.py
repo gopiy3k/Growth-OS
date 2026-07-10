@@ -1,7 +1,7 @@
-"""CDP implementation of `BrowserAdapter` (ADR-024 Local Chrome via CDP).
+"""CDP implementation of `BrowserAdapter` (ADR-027 Local Chrome via CDP).
 
 This is the ONLY place raw CDP appears. It uses the technique verified in
-ADR-024 §12 (smoke test) and §13 (multi-interaction validation):
+ADR-027 §12 (smoke test) and §13 (multi-interaction validation):
   - set textarea value via the React prototype setter + dispatch input event;
   - locate the send button by aria-label and getBoundingClientRect (coords are
     DYNAMIC — resolved per submission, never cached);

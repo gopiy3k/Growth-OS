@@ -1,5 +1,5 @@
 """Increment 2 — end-to-end live smoke validation against the frozen Browser
-Runtime (ADR-024). Drives the REAL CdpBrowserAdapter (no fakes).
+Runtime (ADR-027). Drives the REAL CdpBrowserAdapter (no fakes).
 
 This is a validation harness only, not a collector run. It proves the adapter
 contract against the live Chrome+CDP runtime:

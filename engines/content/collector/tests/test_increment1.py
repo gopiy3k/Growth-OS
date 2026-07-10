@@ -63,7 +63,7 @@ def test_provenance_complete():
     assert provenance_is_complete(prov), "all 10 mandatory fields present"
     assert prov["source"] == "grok"
     assert prov["endpoint"] == "https://x.com/i/grok"
-    assert prov["runtime_version"] == "ADR-024"
+    assert prov["runtime_version"] == "ADR-027"
     # missing field -> incomplete
     incomplete = dict(prov)
     del incomplete["conversation_id"]

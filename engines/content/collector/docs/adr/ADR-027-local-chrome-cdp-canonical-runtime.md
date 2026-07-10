@@ -1,4 +1,4 @@
-# ADR-024 — Local Chrome via CDP as Canonical Browser Runtime
+# ADR-027 — Local Chrome via CDP as Canonical Browser Runtime
 
 **Status:** ACCEPTED (frozen)
 **Date:** 2026-07-11
@@ -162,7 +162,7 @@ configuration, handle login flows, or modify browser runtime behaviour.
 
 ---
 
-## 6.1 Canonical Grok endpoint (ADR-024 amendment, 2026-07-11)
+## 6.1 Canonical Grok endpoint (ADR-027 amendment, 2026-07-11)
 
 The authenticated X session is established and persisted on the X profile
 (`x.com`). The Browser Runtime guarantees persistence for that X profile. The
@@ -283,7 +283,7 @@ canonical flow.
 
 **Conclusion:** Hermes can reliably send one prompt to Grok and retrieve one complete
 response through the frozen Browser Runtime. Collector design may now proceed within
-ADR-024 boundaries.
+ADR-027 boundaries.
 
 ### 12.1 Prompt-submission technique (lessons from the smoke test)
 

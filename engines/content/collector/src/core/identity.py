@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 COLLECTOR_VERSION = "1.0.0"
-RUNTIME_VERSION = "ADR-024"
+RUNTIME_VERSION = "ADR-027"
 SOURCE = "grok"
 ENDPOINT = "https://x.com/i/grok"
 

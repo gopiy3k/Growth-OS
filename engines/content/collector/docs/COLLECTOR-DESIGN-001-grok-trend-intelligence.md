@@ -4,12 +4,12 @@
 **Date:** 2026-07-11
 **Approved:** 2026-07-11 (with Amendments 1–3 incorporated)
 **Profile:** engine-content
-**Depends on:** ADR-024 (Local Chrome via CDP as Canonical Browser Runtime) — FROZEN
+**Depends on:** ADR-027 (Local Chrome via CDP as Canonical Browser Runtime) — FROZEN
 **Prerequisite gates:** Browser Runtime VERIFIED ✅ · Interaction Model VERIFIED ✅ · Multi-interaction VERIFIED ✅
 
 This is the **frozen production design (v1)**. No further architectural redesign without
 explicit PO approval. Implementation proceeds in small, verifiable increments strictly
-within ADR-024 boundaries and the constraints in §22.
+within ADR-027 boundaries and the constraints in §22.
 
 ---
 
@@ -29,7 +29,7 @@ within ADR-024 boundaries and the constraints in §22.
 The collector is an **evidence collector**, not an analyst. The pipeline it feeds:
 
 ```
-Browser Runtime (frozen, ADR-024)
+Browser Runtime (frozen, ADR-027)
   -> Grok Trend Intelligence Collector   [this design]
   -> Evidence Store
   -> Opportunity Discovery               [consumes, NOT bypassed]
@@ -98,7 +98,7 @@ Minimum mandatory fields (all required, no omissions):
 | `browser_session_id` | Chrome session/browser-context id if available (else null) |
 | `collected_at` | UTC ISO-8601 timestamp |
 | `collector_version` | semantic version of the collector build (e.g. `1.0.0`) |
-| `runtime_version` | ADR-024 Browser Runtime version/ref (e.g. `ADR-024`) |
+| `runtime_version` | ADR-027 Browser Runtime version/ref (e.g. `ADR-027`) |
 | `source` | constant `"grok"` |
 | `endpoint` | constant `"https://x.com/i/grok"` |
 
@@ -116,7 +116,7 @@ Phases, in order. Each phase is atomic and leaves the system in a known state.
    Compute **deterministic `collection_id`** (Amendment 1). Load **resume markers**
    `state/<collection_id>.json` (Amendment 1) — know which prompts are already `completed`.
 2. **ATTACH** — connect to Chrome CDP (`Target.getTargets` liveness probe).
-3. **OPEN_TAB** — `Target.createTarget` → **new automation tab only** (ADR-024 §6 invariant).
+3. **OPEN_TAB** — `Target.createTarget` → **new automation tab only** (ADR-027 §6 invariant).
 4. **AUTH_VERIFY** — navigate to `https://x.com/i/grok`; assert `twid`/`auth_token` present
    and composer `<textarea>` present. If absent → FAILURE(AUTH), stop-and-report.
 5. **CONV_SETUP** — per conversation strategy (§4): open fresh conversation (Mode B default).
@@ -138,7 +138,7 @@ Phases, in order. Each phase is atomic and leaves the system in a known state.
 8. **DETACH** — release CDP session handle.
 9. **DONE / SUSPENDED** — exit status recorded.
 
-User tabs are never touched in any phase (ADR-024 §6). The close is in a `finally` so a
+User tabs are never touched in any phase (ADR-027 §6). The close is in a `finally` so a
 failure mid-collection still cleans up the automation tab.
 
 ---
@@ -224,7 +224,7 @@ Prompts are **versioned, registered artifacts** — never inline strings in code
 ## 4. Conversation strategy (Mode A vs Mode B)
 
 **Mode A — one persistent conversation per collection session.**
-- Pros: matches validated continuity (ADR-024 §13); least setup overhead.
+- Pros: matches validated continuity (ADR-027 §13); least setup overhead.
 - Cons: **context pollution** — Grok conditions each response on the entire thread, so a
   later prompt's output is contaminated by earlier, unrelated prompts. Violates
   *deterministic* and *reproducible*. Shared `conversation_id` across unrelated topics
@@ -257,7 +257,7 @@ new conversation, never by appending to a polluted one.
 
 ## 5. Browser interaction sequence
 
-All interactions use **raw CDP** (per ADR-024 §12 — high-level `browser_navigate` is
+All interactions use **raw CDP** (per ADR-027 §12 — high-level `browser_navigate` is
 forbidden: it reuses the live user tab). Sequence per prompt:
 
 1. **Resolve composer (dynamic, every time):** `Runtime.evaluate` →
@@ -296,7 +296,7 @@ forbidden: it reuses the live user tab). Sequence per prompt:
 
 ## 6. Completion detection
 
-A prompt is **complete** only when **all** verified conditions hold (ADR-024 §13):
+A prompt is **complete** only when **all** verified conditions hold (ADR-027 §13):
 
 1. `textarea` value is empty (prompt submitted, composer reset).
 2. Response text is present (the assistant message after the echoed prompt exists).
@@ -320,7 +320,7 @@ Locate the **last assistant message block** after the echoed user prompt. Prefer
 selector (e.g. a message-container `data-testid` / `article` if present); extract its
 `innerText` (and optionally `innerHTML` for fidelity).
 
-**Fallback (validated in ADR-024 §12/§13):** if no stable message selector exists, window
+**Fallback (validated in ADR-027 §12/§13):** if no stable message selector exists, window
 the page `innerText` between the echoed prompt and the next control marker
 (`"Fast"` / suggestion-chip text / composer). This was proven to yield clean boundaries
 for single- and multi-line responses.
@@ -352,7 +352,7 @@ Written **before** any normalization. Append-only, immutable.
     "browser_session_id": "<chrome browser-context id if available, else null>",
     "collected_at": "2026-07-11T09:00:15Z",
     "collector_version": "1.0.0",
-    "runtime_version": "ADR-024",
+    "runtime_version": "ADR-027",
     "source": "grok",
     "endpoint": "https://x.com/i/grok"
   },
@@ -423,7 +423,7 @@ links back to the raw evidence.
     "browser_session_id": "<if available, else null>",
     "collected_at": "2026-07-11T09:00:15Z",
     "collector_version": "1.0.0",
-    "runtime_version": "ADR-024",
+    "runtime_version": "ADR-027",
     "source": "grok",
     "endpoint": "https://x.com/i/grok"
   },
@@ -468,7 +468,7 @@ links back to the raw evidence.
 
 ## 11. Retry policy
 
-Strict separation of **transport** vs **interaction** failures (ADR-024 §13):
+Strict separation of **transport** vs **interaction** failures (ADR-027 §13):
 
 **Transport failures (retryable):**
 - CDP `Runtime.evaluate` / `Input.dispatch*` transient errors (`code: -32601`, timeouts,
@@ -572,7 +572,7 @@ validation proved benign.
 
 | Symptom | Action |
 |---------|--------|
-| Auth lost (AUTH) | STOP. Alert PO. **Do not** attempt re-login (out of collector boundary, ADR-024). |
+| Auth lost (AUTH) | STOP. Alert PO. **Do not** attempt re-login (out of collector boundary, ADR-027). |
 | Rate limit / quota (QUOTA) | Graceful SUSPEND: record quota state, exit 0 (suspended). Resume next window. **Do not** burn quota on diagnostics. |
 | Target detached (TRANSPORT) | Retry per §11; if persistent, FAIL safe — close tab, alert. |
 | Submit/extract fail (INTERACTION/EXTRACTION) | STOP, report exact browser+DOM state + screenshot if available. No auto-retry. |
@@ -596,9 +596,9 @@ validation proved benign.
 
 ## 20. Production readiness checklist
 
-- [x] ADR-024 FROZEN and accepted as canonical runtime record.
-- [x] Browser Runtime VERIFIED (smoke test, ADR-024 §12).
-- [x] Interaction Model VERIFIED (multi-interaction, ADR-024 §13).
+- [x] ADR-027 FROZEN and accepted as canonical runtime record.
+- [x] Browser Runtime VERIFIED (smoke test, ADR-027 §12).
+- [x] Interaction Model VERIFIED (multi-interaction, ADR-027 §13).
 - [x] Canonical endpoint `x.com/i/grok` mandated (no `grok.com`).
 - [x] Dynamic-UI rule: resolve DOM before every interaction; coords fallback only.
 - [x] Transport vs interaction failure separation defined (§11).
@@ -623,15 +623,15 @@ validation proved benign.
 
 ---
 
-## Appendix A — Relationship to ADR-024
+## Appendix A — Relationship to ADR-027
 
-This design is wholly dependent on and bounded by ADR-024:
-- Runtime = Local Chrome via CDP (§1/§2 of ADR-024). Collector never manages it.
+This design is wholly dependent on and bounded by ADR-027:
+- Runtime = Local Chrome via CDP (§1/§2 of ADR-027). Collector never manages it.
 - New-automation-tab invariant (§6) → enforced in lifecycle `finally`.
 - Canonical endpoint `x.com/i/grok` (§6.1) → hardcoded as the only navigation target.
 - Submission technique (§12.1) → encoded in §5.
 - Multi-interaction findings (§13: dynamic coords, transient CDP, completion heuristic)
   → encoded in §5/§6/§11.
 
-ADR-024 remains FROZEN. This design does not revisit any runtime decision; it consumes the
+ADR-027 remains FROZEN. This design does not revisit any runtime decision; it consumes the
 proven runtime as an infrastructure dependency exactly like a database or filesystem.
