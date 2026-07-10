@@ -1,0 +1,15 @@
+{
+  "registry_version": "1.0.0",
+  "updated_at": "2026-07-11T00:00:00Z",
+  "owner": "engine-content",
+  "prompts": [
+    {
+      "prompt_id": "PROMPT-TREND-SCAN",
+      "version": "1.0.0",
+      "description": "Scan for emerging AI tooling trends on Grok over the last 24h.",
+      "template": "Survey the last 24 hours of discussions on Grok about AI tooling. List distinct emerging trends with a one-line piece of evidence for each.",
+      "variables": [],
+      "created_at": "2026-07-11T00:00:00Z"
+    }
+  ]
+}
