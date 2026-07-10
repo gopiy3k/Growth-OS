@@ -236,7 +236,7 @@ browser:
 Dedicated Chrome launch (user-run, Windows):
 ```bat
 "C:\Program Files\Google\Chrome\Application\chrome.exe" ^
-  --user-data-dir="C:\Users\Gopinath\hermes-x-profile" ^
+  --user-data-dir="<DEDICATED_X_PROFILE_DIR>" ^
   --remote-debugging-port=9333 ^
   --no-first-run --no-default-browser-check
 ```
