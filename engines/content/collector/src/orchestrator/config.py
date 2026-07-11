@@ -41,6 +41,9 @@ class CollectorConfig:
     store_dir: Optional[Path] = None
     # Where normalized evidence + OD contract artifacts are written (Q2/Q5).
     artifact_dir: Optional[Path] = None
+    # Where the OD intake drop zone lives (Q5, design §16). Defaults into the
+    # collector data tree; the collector never writes OD internal state.
+    intake_dir: Optional[Path] = None
     # Override conversation_id when the runtime supplies it out-of-band.
     conversation_id: Optional[str] = None
 

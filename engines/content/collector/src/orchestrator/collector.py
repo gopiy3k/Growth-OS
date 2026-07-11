@@ -45,6 +45,7 @@ from core.identity import (
 from core.resume_state import PromptStatus, ResumeState
 from core.evidence_store import EvidenceStore
 from core.normalizer import normalize
+from core.od_intake import OpportunityIntake
 from prompt_registry.loader import PromptRegistry
 
 from .collection_result import (
@@ -106,6 +107,8 @@ class GrokCollector:
         self._state_dir = config.state_dir
         self._resume = ResumeState(self.collection_id, self._state_dir)
         self._store = EvidenceStore(config.store_dir)
+        # Q5: OD intake drop zone (design §16 contract). No OD dependency.
+        self._intake = OpportunityIntake(config.intake_dir)
         self._url_by_target: dict[str, str] = {}
         # Diagnostic: the automation tab opened for this run (opaque to the
         # orchestrator; exposed read-only for cleanup verification/tests).
@@ -250,10 +253,13 @@ class GrokCollector:
 
     def _persist_normalized(self, raw: dict, result: CollectionResult) -> None:
         """Q2: normalize raw -> §9 and persist (exactly-once). Counts new
-        normalized artifacts on the result for verification."""
+        normalized artifacts on the result for verification. Q5: also emit the
+        normalized record to the OD intake drop zone (design §16 contract)."""
         normalized = normalize(raw)
         if self._store.preserve_normalized(normalized):
             result.normalized_persisted += 1
+        emitted = self._intake.emit([normalized])
+        result.od_emitted += emitted
 
     # --- helpers (runtime-agnostic) ---
 
