@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import uuid
 from datetime import datetime, timezone
 
 # --- path bootstrap (identical to run_discover_stage.py) --------------------------------
@@ -53,6 +54,30 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _open_editorial_cycle() -> str:
+    """Open an Editorial Memory cycle for observability parity.
+
+    Non-fatal: if Supabase is unconfigured or the write fails, we only warn and return a
+    sentinel cycle id so the real ingestion (enqueue) still proceeds. The actual enqueue
+    remains cred-gated (AGENTS.md §9); only observability is best-effort.
+    """
+    try:
+        return em.start_cycle()
+    except Exception as e:  # noqa: BLE001
+        print(f"[od:collector-intake] WARN: editorial memory cycle unavailable "
+              f"({type(e).__name__}: {e}); continuing without cycle", file=sys.stderr)
+        return f"no-cycle-{uuid.uuid4().hex[:8]}"
+
+
+def _record_editorial_candidates(cycle_id: str, candidate_topics: list) -> None:
+    """Record discovered candidates to Editorial Memory. Non-fatal (observability only)."""
+    try:
+        em.record_candidates(cycle_id, candidate_topics)
+    except Exception as e:  # noqa: BLE001
+        print(f"[od:collector-intake] WARN: editorial memory candidate record failed "
+              f"({type(e).__name__}: {e})", file=sys.stderr)
+
+
 def collect_items(intake_dir=None) -> list[dict]:
     """Return Source items from the collector intake drop-zone (delegates to collector_signal).
 
@@ -70,7 +95,7 @@ def discover_once(intake_dir=None) -> dict:
     raw_count = len(raw_items)
 
     now = _now()
-    cycle_id = em.start_cycle()  # observability parity; non-fatal if Supabase absent
+    cycle_id = _open_editorial_cycle()  # observability parity; non-fatal if Supabase absent
 
     enqueued = 0
     dropped_dup = 0
@@ -117,7 +142,7 @@ def discover_once(intake_dir=None) -> dict:
         })
         items_out.append(payload)
 
-    em.record_candidates(cycle_id, candidate_topics)
+    _record_editorial_candidates(cycle_id, candidate_topics)  # non-fatal observability
 
     report = {
         "raw": raw_count,

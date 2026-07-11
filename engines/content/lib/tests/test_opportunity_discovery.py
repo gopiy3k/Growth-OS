@@ -133,3 +133,32 @@ def test_driver_empty_intake_is_safe():
     report = rod.discover_once(empty)
     assert report["raw"] == 0
     assert report["enqueued"] == 0
+
+
+def test_driver_survives_missing_supabase_editorial_memory():
+    """Regression: the OD driver must NOT hard-crash when Editorial Memory is
+    unconfigured (no SUPABASE_URL/KEY). The real editorial_memory.start_cycle()
+    raises RuntimeError in that state, but observability is best-effort and the
+    actual enqueue (cred-gated) must still proceed (design §6, report §2.2).
+
+    We swap run_opportunity_discovery.em to the REAL editorial_memory module (whose
+    _env() raises RuntimeError without creds) to prove ingestion survives it.
+    """
+    import run_opportunity_discovery as rod
+
+    # Force a real RuntimeError from the real editorial_memory._env() cred gate.
+    os.environ.pop("SUPABASE_URL", None)
+    os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
+    sys.modules.pop("editorial_memory", None)
+    real_em = importlib.import_module("editorial_memory")
+    rod.em = real_em  # rebind so discover_once uses the REAL (cred-gated) module
+
+    # eos_queue stays mocked (so no network), but editorial_memory is the real one.
+    report = rod.discover_once(REAL_INTAKE)
+    assert report["enqueued"] == 11, "ingestion must proceed even without editorial memory"
+    assert report["dropped_dup"] == 0
+    assert report["cycle_id"].startswith("no-cycle-"), "cycle_id sentinel when EM unavailable"
+    # All enqueued via the frozen contract.
+    for engine, stage, _payload in _CAPTURE["enqueued"]:
+        assert engine == "content"
+        assert stage == "score"
