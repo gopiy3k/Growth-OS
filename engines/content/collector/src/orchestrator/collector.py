@@ -22,7 +22,7 @@ PO Increment 3 amendments:
 
 from __future__ import annotations
 
-from pathlib import Path
+import asyncio
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -128,9 +128,14 @@ class GrokCollector:
                 await self.adapter.navigate(tab, endpoint)
                 await self.adapter.verify_auth(tab)
             except BrowserAdapterError as e:
-                result.error = f"{type(e).__name__}: {e}"
-                result.finish(CollectionStatus.FAILED)
+                self._fail(result, e, CollectionStatus.FAILED)
                 return result
+            except asyncio.CancelledError:
+                # Cancellation during AUTH_VERIFY: close/detach best-effort,
+                # then re-raise so the caller observes the cancellation.
+                await self._safe_close(tab)
+                await self._safe_detach()
+                raise
 
             # CONV_SETUP: derive conversation_id ONLY if the runtime exposes it.
             browser_metadata: dict = {}
@@ -152,9 +157,13 @@ class GrokCollector:
                 try:
                     await self._collect_one(tab, ref, result, browser_metadata)
                 except BrowserAdapterError as e:
-                    result.error = f"{type(e).__name__}: {e}"
-                    result.finish(CollectionStatus.FAILED)
+                    self._fail(result, e, CollectionStatus.FAILED)
                     return result
+                except asyncio.CancelledError:
+                    # Cancellation mid-prompt: the outer finally still closes
+                    # the tab + detaches; re-raise after marking the failure.
+                    self._fail(result, e, CollectionStatus.FAILED)
+                    raise
 
             # Terminal status
             if result.prompts_total == result.prompts_skipped:
@@ -203,6 +212,7 @@ class GrokCollector:
             browser_metadata=browser_metadata,
             submitted_at=submitted_at,
             completed_at=completed_at,
+            endpoint=self.config.endpoint,
         )
         assert rec.is_valid(), "provenance incomplete on preserved raw record"
         result.add_record(rec)
@@ -221,17 +231,25 @@ class GrokCollector:
         """
         return self._url_by_target.get(tab.target_id, "")
 
+    def _fail(self, result: CollectionResult, exc: Exception, status: CollectionStatus) -> None:
+        """Record a terminal failure and set status (single error-format path)."""
+        result.error = f"{type(exc).__name__}: {exc}"
+        result.finish(status)
+
     async def _safe_close(self, tab: TabHandle) -> None:
+        # Best-effort under normal failure AND under cancellation: a shielded
+        # close means the automation tab is torn down even if the outer task
+        # was cancelled, so the ADR-027 §6 invariant holds on every path.
         try:
-            await self.adapter.close_tab(tab)
-        except BrowserAdapterError:
-            # best-effort; finally must not raise and mask the real error
+            await asyncio.shield(self.adapter.close_tab(tab))
+        except (BrowserAdapterError, asyncio.CancelledError):
+            # best-effort; must not raise and mask the real error
             pass
 
     async def _safe_detach(self) -> None:
         try:
-            await self.adapter.detach()
-        except BrowserAdapterError:
+            await asyncio.shield(self.adapter.detach())
+        except (BrowserAdapterError, asyncio.CancelledError):
             pass
 
 
