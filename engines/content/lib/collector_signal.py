@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -40,6 +41,27 @@ _DEFAULT_INTAKE_DIR = (
     / "opportunity-intake"
 )
 
+# Production data-boundary guard (TP-003): refuse to consume known synthetic test fixtures.
+# A fixture is synthetic if any of these markers appear in the record, or the file is explicitly
+# named as a fixture ('.fake.'). This prevents placeholder/fake evidence from ever reaching the
+# editorial pipeline under the guise of a real intake drop.
+_SYNTHETIC_RECORD_MARKERS = (
+    '"FAKE123"',
+    '"FAKE GROK RESPONSE',
+    '"FAKE RESPONSE"',
+    'conversation_id": "FAKE123"',
+)
+
+
+def _is_synthetic_record(rec: dict) -> bool:
+    """True if the record carries a known synthetic-test marker."""
+    blob = json.dumps(rec, ensure_ascii=False)
+    return any(m in blob for m in _SYNTHETIC_RECORD_MARKERS)
+
+
+def _is_fixture_file(path: Path) -> bool:
+    return ".fake." in path.name
+
 
 def _intake_dir() -> Path:
     env = os.environ.get("COLLECTOR_INTAKE_DIR")
@@ -49,11 +71,20 @@ def _intake_dir() -> Path:
 
 
 def _read_intake_records(intake_dir: Path) -> list[dict]:
-    """Read every <date>.jsonl in intake_dir. Returns the parsed §9 records in file order."""
+    """Read every <date>.jsonl in intake_dir. Returns the parsed §9 records in file order.
+
+    Production data-boundary guard (TP-003): files explicitly named as fixtures ('.fake.')
+    and individual records carrying synthetic-test markers (e.g. FAKE123 / "FAKE GROK RESPONSE")
+    are REFUSED — they are logged and skipped so placeholder evidence can never reach the
+    editorial pipeline.
+    """
     if not intake_dir.exists():
         return []
     records: list[dict] = []
     for path in sorted(intake_dir.glob("*.jsonl")):
+        if _is_fixture_file(path):
+            print(f"[collector_signal] SKIP fixture file (synthetic): {path}", file=sys.stderr)
+            continue
         try:
             with path.open("r", encoding="utf-8") as fh:
                 for line in fh:
@@ -61,11 +92,18 @@ def _read_intake_records(intake_dir: Path) -> list[dict]:
                     if not line:
                         continue
                     try:
-                        records.append(json.loads(line))
+                        rec = json.loads(line)
                     except json.JSONDecodeError:
                         # Defensive: a malformed line cannot be audited/deduped; skip it.
                         # The collector is trusted to emit well-formed records (design §16).
                         continue
+                    if _is_synthetic_record(rec):
+                        print(
+                            f"[collector_signal] SKIP synthetic record (FAKE marker) in {path}",
+                            file=sys.stderr,
+                        )
+                        continue
+                    records.append(rec)
         except OSError:
             continue
     return records

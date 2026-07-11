@@ -1,10 +1,13 @@
 """Unit tests for the Opportunity Discovery collector-intake pipeline.
 
-These tests run against the REAL RC3 collector intake fixture
-(engines/content/collector/data/opportunity-intake/2026-07-11.jsonl) — the canonical
-upstream input per the OD mission. They verify the reporter (collector_signal) and the
-driver (run_opportunity_discovery) preserve evidence fidelity, dedup, and the frozen
-eos_queue enqueue contract — with NO modification to frozen modules.
+These tests run against the REAL RC3 collector intake
+(engines/content/collector/data/rc3/intake/2026-07-11.jsonl) — the genuine upstream input
+from the RC3 Grok collection (collection_id 55d63dd9…, real handles). They verify the reporter
+(collector_signal) and the driver (run_opportunity_discovery) preserve evidence fidelity, dedup,
+and the frozen eos_queue enqueue contract — with NO modification to frozen modules.
+
+Synthetic test fixtures live in engines/content/collector/tests/fixtures/opportunity-intake/
+(never the production drop-zone) and are refused by the collector_signal guard.
 
 The frozen eos_queue / editorial_memory are mocked so tests need no Supabase.
 """
@@ -68,18 +71,21 @@ def _mocks(monkeypatch):
     sys.modules.pop("editorial_memory", None)
 
 
-REAL_INTAKE = _ROOT / "collector" / "data" / "opportunity-intake"
+REAL_INTAKE = _ROOT / "collector" / "data" / "rc3" / "intake"
 
 
 def test_reporter_reads_real_rc3_fixture():
     import collector_signal as cs
     items = cs.collector_intake_items(REAL_INTAKE)
-    assert len(items) == 11, f"expected 11 RC3 records, got {len(items)}"
+    assert len(items) == 1, f"expected 1 RC3 record, got {len(items)}"
     for it in items:
         assert it["url"], "every item needs a stable source_url for dedup"
         assert it["raw_evidence_ref"], "raw_evidence_ref must be carried for audit"
         assert it["record_key"], "record_key must be carried"
         assert it["content"], "items must carry extractable content"
+        # TP-003 guard: real RC3 evidence must never carry synthetic markers.
+        assert "FAKE123" not in str(it), "synthetic marker leaked into real intake"
+        assert "FAKE GROK RESPONSE" not in it["content"], "synthetic content leaked"
 
 
 def test_reporter_skips_malformed_records():
@@ -92,8 +98,8 @@ def test_reporter_skips_malformed_records():
 def test_driver_enqueues_to_frozen_score_stage():
     import run_opportunity_discovery as rod
     report = rod.discover_once(REAL_INTAKE)
-    assert report["raw"] == 11
-    assert report["enqueued"] == 11
+    assert report["raw"] == 1
+    assert report["enqueued"] == 1
     assert report["dropped_dup"] == 0
     # All enqueued via the frozen contract.
     for engine, stage, _payload in _CAPTURE["enqueued"]:
@@ -124,7 +130,7 @@ def test_driver_is_idempotent_via_dedup():
         _CAPTURE["known"].add(payload["source_url"])
     report2 = rod.discover_once(REAL_INTAKE)
     assert report2["enqueued"] == 0
-    assert report2["dropped_dup"] == 11
+    assert report2["dropped_dup"] == 1
 
 
 def test_driver_empty_intake_is_safe():
@@ -137,28 +143,49 @@ def test_driver_empty_intake_is_safe():
 
 def test_driver_survives_missing_supabase_editorial_memory():
     """Regression: the OD driver must NOT hard-crash when Editorial Memory is
-    unconfigured (no SUPABASE_URL/KEY). The real editorial_memory.start_cycle()
-    raises RuntimeError in that state, but observability is best-effort and the
-    actual enqueue (cred-gated) must still proceed (design §6, report §2.2).
+    unavailable. Observability is best-effort and the actual enqueue must still
+    proceed (design §6, report §2.2).
 
-    We swap run_opportunity_discovery.em to the REAL editorial_memory module (whose
-    _env() raises RuntimeError without creds) to prove ingestion survives it.
+    We simulate an unavailable Editorial Memory by rebinding the driver's `em` to
+    None (the same failure path as a missing/untrained module). This is self-contained
+    and does NOT depend on the untracked PO editorial_memory module.
     """
     import run_opportunity_discovery as rod
 
-    # Force a real RuntimeError from the real editorial_memory._env() cred gate.
-    os.environ.pop("SUPABASE_URL", None)
-    os.environ.pop("SUPABASE_SERVICE_ROLE_KEY", None)
-    sys.modules.pop("editorial_memory", None)
-    real_em = importlib.import_module("editorial_memory")
-    rod.em = real_em  # rebind so discover_once uses the REAL (cred-gated) module
+    # Simulate EM unavailable (None == not configured / import failed).
+    rod.em = None
 
-    # eos_queue stays mocked (so no network), but editorial_memory is the real one.
+    # eos_queue stays mocked (so no network).
     report = rod.discover_once(REAL_INTAKE)
-    assert report["enqueued"] == 11, "ingestion must proceed even without editorial memory"
+    assert report["enqueued"] == 1, "ingestion must proceed even without editorial memory"
     assert report["dropped_dup"] == 0
     assert report["cycle_id"].startswith("no-cycle-"), "cycle_id sentinel when EM unavailable"
     # All enqueued via the frozen contract.
     for engine, stage, _payload in _CAPTURE["enqueued"]:
         assert engine == "content"
         assert stage == "score"
+
+
+def test_production_path_refuses_synthetic_fixtures():
+    """TP-003 permanent guard: the production intake path must never consume
+    known synthetic test fixtures (FAKE123 / 'FAKE GROK RESPONSE') nor files
+    explicitly named as fixtures ('.fake.')."""
+    import collector_signal as cs
+    from pathlib import Path as _P
+    import tempfile, json
+
+    fixture_dir = _ROOT / "collector" / "tests" / "fixtures" / "opportunity-intake"
+    # The quarantined FAKE file must be skipped entirely.
+    items = cs.collector_intake_items(fixture_dir)
+    assert items == [], "production path consumed a synthetic fixture"
+
+    # An inline synthetic record must be refused even if dropped into a real dir.
+    with tempfile.TemporaryDirectory() as d:
+        p = _P(d) / "2026-07-11.jsonl"
+        p.write_text(json.dumps({
+            "record_key": {"collection_id": "x"},
+            "provenance": {"collection_id": "x", "conversation_id": "FAKE123"},
+            "raw_evidence_ref": "evidence/x/y.json",
+            "sections": [{"body": "FAKE GROK RESPONSE about AI tooling."}],
+        }), encoding="utf-8")
+        assert cs.collector_intake_items(_P(d)) == [], "synthetic marker passed the guard"
