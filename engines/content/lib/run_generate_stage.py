@@ -140,7 +140,24 @@ def reason_item(payload: dict) -> dict:
     if choices:
         content_str = choices[0].get("message", {}).get("content", "") or ""
     parsed = json.loads(content_str)  # raises on malformed -> fail() path
-    return _normalize(parsed, model)
+    result = _normalize(parsed, model)
+    _carry_provenance(result, payload)
+    return result
+
+
+# Provenance preservation (ENGINE-009). The collector attaches an immutable evidence
+# contract to every opportunity. These fields identify the raw collector artifact and MUST
+# survive untouched through the whole downstream pipeline so the Approved Pool remains
+# auditable back to source. They ride existing result_json/payload_json jsonb — no schema,
+# stage, or queue change, and no reasoning stage interprets them.
+_PROVENANCE_FIELDS = ("raw_evidence_ref", "record_key", "collector_version", "endpoint")
+
+
+def _carry_provenance(dst: dict, src: dict) -> None:
+    """Copy the collector provenance contract from src -> dst if present (never invents)."""
+    for _k in _PROVENANCE_FIELDS:
+        if src.get(_k) is not None:
+            dst[_k] = src.get(_k)
 
 
 def main() -> int:
@@ -173,6 +190,12 @@ def main() -> int:
                 "draft_title": result.get("draft_title", ""),
                 "draft_body": result.get("draft_body", ""),
                 "tone": result.get("tone", ""),
+                # Provenance preservation (ENGINE-009): forward the collector evidence
+                # contract to Review / Approved Pool if present. Never invents fields.
+                "raw_evidence_ref": payload.get("raw_evidence_ref"),
+                "record_key": payload.get("record_key"),
+                "collector_version": payload.get("collector_version"),
+                "endpoint": payload.get("endpoint"),
                 "generated_from": payload,
             },
         )
