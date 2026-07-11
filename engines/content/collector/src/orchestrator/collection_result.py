@@ -147,6 +147,19 @@ class RawEvidenceRecord:
             },
         )
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "RawEvidenceRecord":
+        """Reconstruct from ``to_dict()`` output (Q1 resume rehydration)."""
+        return cls(
+            provenance=data.get("provenance", {}),
+            record_key=data.get("record_key", {}),
+            prompt=data.get("prompt", {}),
+            raw_response=data.get("raw_response", ""),
+            extraction=data.get("extraction", {}),
+            browser_metadata=data.get("browser_metadata", {}),
+            timestamps=data.get("timestamps", {}),
+        )
+
 
 @dataclass
 class CollectionResult:
@@ -161,6 +174,7 @@ class CollectionResult:
     prompts_total: int = 0
     prompts_completed: int = 0
     prompts_skipped: int = 0
+    records_persisted: int = 0
     error: Optional[str] = None
 
     def add_record(self, rec: RawEvidenceRecord) -> None:

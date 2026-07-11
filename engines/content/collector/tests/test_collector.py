@@ -42,6 +42,7 @@ from orchestrator import (  # noqa: E402
     PromptRef,
     RawEvidenceRecord,
 )
+from core.evidence_store import EvidenceStore  # noqa: E402
 from orchestrator.collector import _parse_conversation_id  # noqa: E402
 
 # Known persistent user tab (from runtime verification, ADR-027).
@@ -271,6 +272,64 @@ def test_no_policy_hardcoded_in_config_defaults():
     assert cfg.endpoint == "https://x.com/i/grok"
     assert cfg.completion_timeout == 120.0
     assert cfg.transport_retry_limit == 3
+
+
+# ----------------------------- Q1 tests (evidence persistence) -----------------------------
+
+def test_q1_run_persists_records_and_resume_rehydrates():
+    """A finished run writes durable raw evidence; a second run with the same
+    collection_id (resume) reloads it without recollecting or duplicating."""
+    import tempfile
+
+    work = Path(tempfile.mkdtemp())
+    state_dir = work / "state"
+    store_dir = work / "store"
+    cfg = CollectorConfig(state_dir=state_dir, store_dir=store_dir)
+    refs = [PromptRef(FAKE_PROMPT_ID, FAKE_PROMPT_VER, {"topic": "AI"})]
+    label = "q1-persist"
+
+    adapter1 = FakeBrowserAdapter()
+    col1 = GrokCollector(adapter1, _make_registry(), cfg, refs, label)
+    res1 = asyncio.run(col1.run_collection())
+    assert res1.status == CollectionStatus.SUCCESS
+    assert res1.prompts_completed == 1
+
+    # Exactly one durable record on disk.
+    store = EvidenceStore(store_dir)
+    recs = store.records_for(col1.collection_id)
+    assert len(recs) == 1
+    assert recs[0]["raw_response"].startswith("FAKE GROK RESPONSE")
+
+    # Resume: new adapter (would "recollect" if not skipped), same state+store.
+    adapter2 = FakeBrowserAdapter()
+    col2 = GrokCollector(adapter2, _make_registry(), cfg, refs, label)
+    res2 = asyncio.run(col2.run_collection())
+    assert res2.status == CollectionStatus.SKIPPED
+    assert res2.prompts_skipped == 1
+    assert res2.records_persisted == 1
+    # In-memory result still carries the full rehydrated evidence.
+    assert len(res2.records) == 1
+    assert res2.records[0]["raw_response"].startswith("FAKE GROK RESPONSE")
+    # No duplicate file written.
+    assert len(store.records_for(col2.collection_id)) == 1
+    # The fake adapter never submitted on the resume run (idempotent skip).
+    assert adapter2.submits == []
+
+
+def test_q1_records_persisted_count_on_fresh_run():
+    import tempfile
+
+    work = Path(tempfile.mkdtemp())
+    cfg = CollectorConfig(
+        state_dir=Path(tempfile.mkdtemp()),
+        store_dir=work / "store",
+    )
+    adapter = FakeBrowserAdapter()
+    col = GrokCollector(adapter, _make_registry(), cfg,
+                        [PromptRef(FAKE_PROMPT_ID, FAKE_PROMPT_VER, {"topic": "AI"})], "q1-count")
+    res = asyncio.run(col.run_collection())
+    assert res.records_persisted == 0  # persisted count tracks resume-rehydrated
+    assert len(EvidenceStore(work / "store").records_for(col.collection_id)) == 1
 
 
 if __name__ == "__main__":

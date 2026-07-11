@@ -39,6 +39,10 @@ class CollectorConfig:
     quota_limit: Optional[int] = None
     # Where resume markers live; defaults into the collector data tree.
     state_dir: Optional[Path] = None
+    # Where raw evidence records are persisted (Q1); defaults into collector tree.
+    store_dir: Optional[Path] = None
+    # Where normalized evidence + OD contract artifacts are written (Q2/Q5).
+    artifact_dir: Optional[Path] = None
     # Override conversation_id when the runtime supplies it out-of-band.
     conversation_id: Optional[str] = None
 

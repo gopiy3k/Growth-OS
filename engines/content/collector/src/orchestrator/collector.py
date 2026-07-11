@@ -40,8 +40,10 @@ from core.identity import (
     compute_prompt_hash,
     utc_date,
     utc_iso,
+    RecordKey,
 )
 from core.resume_state import PromptStatus, ResumeState
+from core.evidence_store import EvidenceStore
 from prompt_registry.loader import PromptRegistry
 
 from .collection_result import (
@@ -102,6 +104,7 @@ class GrokCollector:
         )
         self._state_dir = config.state_dir
         self._resume = ResumeState(self.collection_id, self._state_dir)
+        self._store = EvidenceStore(config.store_dir)
         self._url_by_target: dict[str, str] = {}
         # Diagnostic: the automation tab opened for this run (opaque to the
         # orchestrator; exposed read-only for cleanup verification/tests).
@@ -152,6 +155,15 @@ class GrokCollector:
                 pid, ver = ref.key()
                 # SKIP_IF_DONE (idempotent no-op — Amendment 1)
                 if self._resume.is_completed(pid, ver):
+                    # Q1: rehydrate the previously-durably-preserved record into
+                    # the in-memory result so a resumed run still returns full
+                    # evidence (no re-collection, no duplicate on disk).
+                    prior = self._store.load(
+                        self.collection_id, RecordKey(self.collection_id, pid, ver)
+                    )
+                    if prior is not None:
+                        result.add_record(RawEvidenceRecord.from_dict(prior))
+                        result.records_persisted += 1
                     result.prompts_skipped += 1
                     continue
                 try:
@@ -216,6 +228,9 @@ class GrokCollector:
         )
         assert rec.is_valid(), "provenance incomplete on preserved raw record"
         result.add_record(rec)
+        # PERSIST (Q1): durable exactly-once write. A second preserve for the
+        # same key is a no-op (returns False) — resume never duplicates.
+        self._store.preserve(rec.to_dict())
         # Mark completed so resume skips it (Amendment 1 exactly-once)
         self._resume.mark(pid, ver, PromptStatus.COMPLETED)
         result.prompts_completed += 1
