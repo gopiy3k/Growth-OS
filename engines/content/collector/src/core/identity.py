@@ -93,14 +93,20 @@ def build_provenance(
     collection_id: str,
     prompt_id: str,
     prompt_version: str,
-    conversation_id: str,
+    conversation_id: Optional[str] = None,
     collected_at: Optional[str] = None,
     browser_session_id: Optional[str] = None,
 ) -> dict:
     """Mandatory provenance block (Amendment 3).
 
-    All ten fields are required. Downstream systems MUST NOT process a record
-    missing any of them.
+    All fields under `provenance` are required. `conversation_id` and
+    `browser_session_id` MAY be null (a runtime that cannot determine them
+    — e.g. a future BrowserAdapter impl — leaves them null; the key MUST
+    still be present). All other fields must be non-null.
+
+    Note: per the Increment 3 PO amendment, `conversation_id` is OPTIONAL —
+    the orchestrator must not assume a runtime can derive it, so it is
+    nullable here (carried in `browser_metadata` instead of being required).
     """
     return {
         "collection_id": collection_id,
@@ -137,7 +143,7 @@ def provenance_is_complete(prov: dict) -> bool:
     }
     if not required.issubset(prov.keys()):
         return False
-    nullable = {"browser_session_id"}
+    nullable = {"browser_session_id", "conversation_id"}
     for k in required:
         if k in nullable:
             continue
