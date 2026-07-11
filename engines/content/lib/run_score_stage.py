@@ -168,7 +168,34 @@ def main() -> int:
     try:
         result = reason_item(payload)
         ce_queue.complete(job_id, result, source_url=source_url)
-        print(f"[score] completed job {job_id} -> {result}")
+        # Chain (ADR-026): on APPROVE, enqueue the GENERATE stage so approved seeds
+        # actually produce drafts. Generated posts are untrusted input to Review
+        # (generate enqueues review); Publish jobs are created ONLY by the Selection
+        # mechanism (EOM §8) from the Approved Pool. This is the previously-missing
+        # score->generate edge that completes the production Content Engine chain.
+        if result.get("decision") == "approve":
+            ce_queue.enqueue(
+                ENGINE, "generate",
+                {
+                    "source_url": source_url,
+                    "title": payload.get("title") or payload.get("content", "")[:200],
+                    "content": payload.get("content") or "",
+                    "score": result.get("score"),
+                    "category": result.get("category"),
+                    "decision": result.get("decision"),
+                    "rationale": result.get("rationale"),
+                    "content_type": result.get("category"),
+                    # Provenance preservation (ENGINE-009): forward collector evidence
+                    # contract to generate/review so the Approved Pool stays auditable.
+                    "raw_evidence_ref": result.get("raw_evidence_ref"),
+                    "record_key": result.get("record_key"),
+                    "collector_version": result.get("collector_version"),
+                    "endpoint": result.get("endpoint"),
+                },
+            )
+            print(f"[score] completed job {job_id} -> {result} (enqueued generate)")
+        else:
+            print(f"[score] completed job {job_id} -> rejected (no generate)")
         return 0
     except Exception as e:  # noqa: BLE001
         err = f"{type(e).__name__}: {e}"[:500]
