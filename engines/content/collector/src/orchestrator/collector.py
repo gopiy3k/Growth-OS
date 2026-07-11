@@ -44,6 +44,7 @@ from core.identity import (
 )
 from core.resume_state import PromptStatus, ResumeState
 from core.evidence_store import EvidenceStore
+from core.normalizer import normalize
 from prompt_registry.loader import PromptRegistry
 
 from .collection_result import (
@@ -164,6 +165,9 @@ class GrokCollector:
                     if prior is not None:
                         result.add_record(RawEvidenceRecord.from_dict(prior))
                         result.records_persisted += 1
+                        # Q2: re-derive + persist normalized artifact so a
+                        # resumed run still yields a complete normalized set.
+                        self._persist_normalized(prior, result)
                     result.prompts_skipped += 1
                     continue
                 # Q3: quota guard — if the configured ceiling is reached, stop
@@ -237,9 +241,19 @@ class GrokCollector:
         # PERSIST (Q1): durable exactly-once write. A second preserve for the
         # same key is a no-op (returns False) — resume never duplicates.
         self._store.preserve(rec.to_dict())
+        # NORMALIZE + STORE (Q2): structural parse -> §9 canonical; persist to
+        # the parallel normalized tree. Pure transform; raw is never mutated.
+        self._persist_normalized(rec.to_dict(), result)
         # Mark completed so resume skips it (Amendment 1 exactly-once)
         self._resume.mark(pid, ver, PromptStatus.COMPLETED)
         result.prompts_completed += 1
+
+    def _persist_normalized(self, raw: dict, result: CollectionResult) -> None:
+        """Q2: normalize raw -> §9 and persist (exactly-once). Counts new
+        normalized artifacts on the result for verification."""
+        normalized = normalize(raw)
+        if self._store.preserve_normalized(normalized):
+            result.normalized_persisted += 1
 
     # --- helpers (runtime-agnostic) ---
 

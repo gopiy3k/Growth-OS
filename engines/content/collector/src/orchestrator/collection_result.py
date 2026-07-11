@@ -175,6 +175,7 @@ class CollectionResult:
     prompts_completed: int = 0
     prompts_skipped: int = 0
     records_persisted: int = 0
+    normalized_persisted: int = 0
     error: Optional[str] = None
 
     def add_record(self, rec: RawEvidenceRecord) -> None:

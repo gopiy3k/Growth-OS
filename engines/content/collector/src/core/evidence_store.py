@@ -99,6 +99,46 @@ class EvidenceStore:
                 out.append(json.load(fh))
         return out
 
+    # --- Normalized records (Q2). Stored in a parallel tree so raw stays
+    # immutable and normalized artifacts are separable (design §10). ---
+
+    def _normalized_dir(self, collection_id: str) -> Path:
+        return self.root / "_normalized" / collection_id
+
+    def normalized_path_for(self, collection_id: str, key: RecordKey) -> Path:
+        return self._normalized_dir(collection_id) / key.to_filename()
+
+    def preserve_normalized(self, normalized: dict) -> bool:
+        """Atomically persist one normalized record (exactly-once by key).
+
+        ``normalized`` MUST carry ``record_key`` identity fields (output of
+        ``normalizer.normalize``). Returns True when newly written, False when
+        an identical key already exists (idempotent no-op)."""
+        rk = normalized.get("record_key") or {}
+        collection_id = rk.get("collection_id")
+        prompt_id = rk.get("prompt_id")
+        prompt_version = rk.get("prompt_version")
+        if not (collection_id and prompt_id and prompt_version):
+            raise ValueError("normalized record missing record_key identity fields")
+        key = RecordKey(collection_id, prompt_id, prompt_version)
+        target = self.normalized_path_for(collection_id, key)
+        if target.exists():
+            return False
+        target.parent.mkdir(parents=True, exist_ok=True)
+        self._atomic_write(target, normalized)
+        return True
+
+    def normalized_for(self, collection_id: str) -> list[dict]:
+        """All normalized records for one collection, sorted by filename."""
+        nd = self._normalized_dir(collection_id)
+        if not nd.exists():
+            return []
+        out = []
+        for p in sorted(nd.glob("*.json")):
+            with p.open("r", encoding="utf-8") as fh:
+                out.append(json.load(fh))
+        return out
+
     @staticmethod
     def _atomic_write(target: Path, payload: dict) -> None:
         """Write JSON atomically: temp file + os.replace (crash-safe)."""
