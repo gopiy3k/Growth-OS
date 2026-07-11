@@ -35,7 +35,7 @@ from core.identity import (
 
 # Amended (PO Inc3 #2): explicit execution status simplifies scheduler/resume.
 class CollectionStatus(str, Enum):
-    SUCCESS = "success"        # all prompts collected (or all skipped)
+    SUCCESS = "success"        # all prompts collected (all-skipped yields SKIPPED)
     FAILED = "failed"          # interaction/transport/auth failure, stop-and-report
     SKIPPED = "skipped"        # nothing to do (every prompt already completed)
     SUSPENDED = "suspended"    # quota exhausted / resumable — not an error
@@ -104,9 +104,15 @@ class RawEvidenceRecord:
         browser_metadata: Optional[dict] = None,
         submitted_at: Optional[str] = None,
         completed_at: Optional[str] = None,
+        extracted_at: Optional[str] = None,
         extraction_method: str = "dom_message_block",
         truncated: bool = False,
+        endpoint: Optional[str] = None,
     ) -> "RawEvidenceRecord":
+        # Q0 hygiene: provenance records the ACTUAL endpoint used by the
+        # orchestrator (config.endpoint) rather than only the identity
+        # constant. Falls back to the frozen constant when not supplied, so
+        # existing callers and tests are unaffected.
         provenance = build_provenance(
             collection_id=collection_id,
             prompt_id=prompt_id,
@@ -114,6 +120,8 @@ class RawEvidenceRecord:
             conversation_id=(browser_metadata or {}).get("conversation_id"),
             collected_at=collected_at,
         )
+        if endpoint is not None:
+            provenance["endpoint"] = endpoint
         return cls(
             provenance=provenance,
             record_key=RecordKey(collection_id, prompt_id, prompt_version).to_dict(),
@@ -139,6 +147,19 @@ class RawEvidenceRecord:
             },
         )
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "RawEvidenceRecord":
+        """Reconstruct from ``to_dict()`` output (Q1 resume rehydration)."""
+        return cls(
+            provenance=data.get("provenance", {}),
+            record_key=data.get("record_key", {}),
+            prompt=data.get("prompt", {}),
+            raw_response=data.get("raw_response", ""),
+            extraction=data.get("extraction", {}),
+            browser_metadata=data.get("browser_metadata", {}),
+            timestamps=data.get("timestamps", {}),
+        )
+
 
 @dataclass
 class CollectionResult:
@@ -153,6 +174,9 @@ class CollectionResult:
     prompts_total: int = 0
     prompts_completed: int = 0
     prompts_skipped: int = 0
+    records_persisted: int = 0
+    normalized_persisted: int = 0
+    od_emitted: int = 0
     error: Optional[str] = None
 
     def add_record(self, rec: RawEvidenceRecord) -> None:

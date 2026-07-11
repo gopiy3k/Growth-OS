@@ -22,7 +22,7 @@ PO Increment 3 amendments:
 
 from __future__ import annotations
 
-from pathlib import Path
+import asyncio
 from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -40,8 +40,12 @@ from core.identity import (
     compute_prompt_hash,
     utc_date,
     utc_iso,
+    RecordKey,
 )
 from core.resume_state import PromptStatus, ResumeState
+from core.evidence_store import EvidenceStore
+from core.normalizer import normalize
+from core.od_intake import OpportunityIntake
 from prompt_registry.loader import PromptRegistry
 
 from .collection_result import (
@@ -102,6 +106,9 @@ class GrokCollector:
         )
         self._state_dir = config.state_dir
         self._resume = ResumeState(self.collection_id, self._state_dir)
+        self._store = EvidenceStore(config.store_dir)
+        # Q5: OD intake drop zone (design §16 contract). No OD dependency.
+        self._intake = OpportunityIntake(config.intake_dir)
         self._url_by_target: dict[str, str] = {}
         # Diagnostic: the automation tab opened for this run (opaque to the
         # orchestrator; exposed read-only for cleanup verification/tests).
@@ -128,9 +135,14 @@ class GrokCollector:
                 await self.adapter.navigate(tab, endpoint)
                 await self.adapter.verify_auth(tab)
             except BrowserAdapterError as e:
-                result.error = f"{type(e).__name__}: {e}"
-                result.finish(CollectionStatus.FAILED)
+                self._fail(result, e, CollectionStatus.FAILED)
                 return result
+            except asyncio.CancelledError:
+                # Cancellation during AUTH_VERIFY: close/detach best-effort,
+                # then re-raise so the caller observes the cancellation.
+                await self._safe_close(tab)
+                await self._safe_detach()
+                raise
 
             # CONV_SETUP: derive conversation_id ONLY if the runtime exposes it.
             browser_metadata: dict = {}
@@ -147,14 +159,36 @@ class GrokCollector:
                 pid, ver = ref.key()
                 # SKIP_IF_DONE (idempotent no-op — Amendment 1)
                 if self._resume.is_completed(pid, ver):
+                    # Q1: rehydrate the previously-durably-preserved record into
+                    # the in-memory result so a resumed run still returns full
+                    # evidence (no re-collection, no duplicate on disk).
+                    prior = self._store.load(
+                        self.collection_id, RecordKey(self.collection_id, pid, ver)
+                    )
+                    if prior is not None:
+                        result.add_record(RawEvidenceRecord.from_dict(prior))
+                        result.records_persisted += 1
+                        # Q2: re-derive + persist normalized artifact so a
+                        # resumed run still yields a complete normalized set.
+                        self._persist_normalized(prior, result)
                     result.prompts_skipped += 1
                     continue
+                # Q3: quota guard — if the configured ceiling is reached, stop
+                # and suspend (resumable), never FAILED. The remaining prompts
+                # stay PENDING in resume state so the next run continues.
+                if self._quota_exhausted(result):
+                    result.finish(CollectionStatus.SUSPENDED)
+                    return result
                 try:
                     await self._collect_one(tab, ref, result, browser_metadata)
                 except BrowserAdapterError as e:
-                    result.error = f"{type(e).__name__}: {e}"
-                    result.finish(CollectionStatus.FAILED)
+                    self._fail(result, e, CollectionStatus.FAILED)
                     return result
+                except asyncio.CancelledError:
+                    # Cancellation mid-prompt: the outer finally still closes
+                    # the tab + detaches; re-raise after marking the failure.
+                    self._fail(result, e, CollectionStatus.FAILED)
+                    raise
 
             # Terminal status
             if result.prompts_total == result.prompts_skipped:
@@ -203,12 +237,29 @@ class GrokCollector:
             browser_metadata=browser_metadata,
             submitted_at=submitted_at,
             completed_at=completed_at,
+            endpoint=self.config.endpoint,
         )
         assert rec.is_valid(), "provenance incomplete on preserved raw record"
         result.add_record(rec)
+        # PERSIST (Q1): durable exactly-once write. A second preserve for the
+        # same key is a no-op (returns False) — resume never duplicates.
+        self._store.preserve(rec.to_dict())
+        # NORMALIZE + STORE (Q2): structural parse -> §9 canonical; persist to
+        # the parallel normalized tree. Pure transform; raw is never mutated.
+        self._persist_normalized(rec.to_dict(), result)
         # Mark completed so resume skips it (Amendment 1 exactly-once)
         self._resume.mark(pid, ver, PromptStatus.COMPLETED)
         result.prompts_completed += 1
+
+    def _persist_normalized(self, raw: dict, result: CollectionResult) -> None:
+        """Q2: normalize raw -> §9 and persist (exactly-once). Counts new
+        normalized artifacts on the result for verification. Q5: also emit the
+        normalized record to the OD intake drop zone (design §16 contract)."""
+        normalized = normalize(raw)
+        if self._store.preserve_normalized(normalized):
+            result.normalized_persisted += 1
+        emitted = self._intake.emit([normalized])
+        result.od_emitted += emitted
 
     # --- helpers (runtime-agnostic) ---
 
@@ -221,17 +272,39 @@ class GrokCollector:
         """
         return self._url_by_target.get(tab.target_id, "")
 
+    def _fail(self, result: CollectionResult, exc: Exception, status: CollectionStatus) -> None:
+        """Record a terminal failure and set status (single error-format path)."""
+        result.error = f"{type(exc).__name__}: {exc}"
+        result.finish(status)
+
+    def _quota_exhausted(self, result: CollectionResult) -> bool:
+        """Q3: True when a configured quota_limit has been reached by prompts
+        collected so far this run (plus those resumed from prior runs would
+        over-consume). Quota exhaustion is resumable -> SUSPENDED, never FAILED.
+        Returns False when quota_limit is None (unbounded)."""
+        limit = self.config.quota_limit
+        if limit is None:
+            return False
+        # Count prompts that consumed quota: completed this run + skipped-done
+        # (already counted against quota on their original run) would double
+        # count, so we base the ceiling only on prompts collected this run.
+        consumed = result.prompts_completed
+        return consumed >= limit
+
     async def _safe_close(self, tab: TabHandle) -> None:
+        # Best-effort under normal failure AND under cancellation: a shielded
+        # close means the automation tab is torn down even if the outer task
+        # was cancelled, so the ADR-027 §6 invariant holds on every path.
         try:
-            await self.adapter.close_tab(tab)
-        except BrowserAdapterError:
-            # best-effort; finally must not raise and mask the real error
+            await asyncio.shield(self.adapter.close_tab(tab))
+        except (BrowserAdapterError, asyncio.CancelledError):
+            # best-effort; must not raise and mask the real error
             pass
 
     async def _safe_detach(self) -> None:
         try:
-            await self.adapter.detach()
-        except BrowserAdapterError:
+            await asyncio.shield(self.adapter.detach())
+        except (BrowserAdapterError, asyncio.CancelledError):
             pass
 
 

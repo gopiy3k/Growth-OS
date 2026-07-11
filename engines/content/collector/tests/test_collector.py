@@ -42,6 +42,7 @@ from orchestrator import (  # noqa: E402
     PromptRef,
     RawEvidenceRecord,
 )
+from core.evidence_store import EvidenceStore  # noqa: E402
 from orchestrator.collector import _parse_conversation_id  # noqa: E402
 
 # Known persistent user tab (from runtime verification, ADR-027).
@@ -271,6 +272,150 @@ def test_no_policy_hardcoded_in_config_defaults():
     assert cfg.endpoint == "https://x.com/i/grok"
     assert cfg.completion_timeout == 120.0
     assert cfg.transport_retry_limit == 3
+
+
+# ----------------------------- Q1 tests (evidence persistence) -----------------------------
+
+def test_q1_run_persists_records_and_resume_rehydrates():
+    """A finished run writes durable raw evidence; a second run with the same
+    collection_id (resume) reloads it without recollecting or duplicating."""
+    import tempfile
+
+    work = Path(tempfile.mkdtemp())
+    state_dir = work / "state"
+    store_dir = work / "store"
+    cfg = CollectorConfig(state_dir=state_dir, store_dir=store_dir)
+    refs = [PromptRef(FAKE_PROMPT_ID, FAKE_PROMPT_VER, {"topic": "AI"})]
+    label = "q1-persist"
+
+    adapter1 = FakeBrowserAdapter()
+    col1 = GrokCollector(adapter1, _make_registry(), cfg, refs, label)
+    res1 = asyncio.run(col1.run_collection())
+    assert res1.status == CollectionStatus.SUCCESS
+    assert res1.prompts_completed == 1
+
+    # Exactly one durable record on disk.
+    store = EvidenceStore(store_dir)
+    recs = store.records_for(col1.collection_id)
+    assert len(recs) == 1
+    assert recs[0]["raw_response"].startswith("FAKE GROK RESPONSE")
+
+    # Resume: new adapter (would "recollect" if not skipped), same state+store.
+    adapter2 = FakeBrowserAdapter()
+    col2 = GrokCollector(adapter2, _make_registry(), cfg, refs, label)
+    res2 = asyncio.run(col2.run_collection())
+    assert res2.status == CollectionStatus.SKIPPED
+    assert res2.prompts_skipped == 1
+    assert res2.records_persisted == 1
+    # In-memory result still carries the full rehydrated evidence.
+    assert len(res2.records) == 1
+    assert res2.records[0]["raw_response"].startswith("FAKE GROK RESPONSE")
+    # No duplicate file written.
+    assert len(store.records_for(col2.collection_id)) == 1
+    # The fake adapter never submitted on the resume run (idempotent skip).
+    assert adapter2.submits == []
+
+
+def test_q1_records_persisted_count_on_fresh_run():
+    import tempfile
+
+    work = Path(tempfile.mkdtemp())
+    cfg = CollectorConfig(
+        state_dir=Path(tempfile.mkdtemp()),
+        store_dir=work / "store",
+    )
+    adapter = FakeBrowserAdapter()
+    col = GrokCollector(adapter, _make_registry(), cfg,
+                        [PromptRef(FAKE_PROMPT_ID, FAKE_PROMPT_VER, {"topic": "AI"})], "q1-count")
+    res = asyncio.run(col.run_collection())
+    assert res.records_persisted == 0  # persisted count tracks resume-rehydrated
+    assert len(EvidenceStore(work / "store").records_for(col.collection_id)) == 1
+
+
+# ----------------------------- Q3 tests (quota enforcement) -----------------------------
+
+def _make_multi_registry(ids):
+    reg = PromptRegistry.__new__(PromptRegistry)
+    reg._data = {
+        "prompts": [
+            {
+                "prompt_id": pid,
+                "version": "1.0.0",
+                "description": "fake",
+                "template": "Survey {topic}.",
+                "variables": ["topic"],
+            }
+            for pid in ids
+        ]
+    }
+    return reg
+
+
+def test_q3_quota_limit_none_is_unbounded():
+    import tempfile
+    ids = ["A", "B", "C"]
+    cfg = CollectorConfig(state_dir=Path(tempfile.mkdtemp()),
+                          store_dir=Path(tempfile.mkdtemp()), quota_limit=None)
+    refs = [PromptRef(i, "1.0.0", {"topic": "AI"}) for i in ids]
+    adapter = FakeBrowserAdapter()
+    col = GrokCollector(adapter, _make_multi_registry(ids), cfg, refs, "q3-none")
+    res = asyncio.run(col.run_collection())
+    assert res.status == CollectionStatus.SUCCESS
+    assert res.prompts_completed == 3
+
+
+def test_q3_quota_exhaustion_yields_suspended_resumable():
+    """With quota_limit=2 and 3 prompts, the run collects 2 then SUSPENDS
+    (resumable, not FAILED). A second run (fresh quota) collects the last one
+    and finishes SUCCESS — no duplicate, no re-collection of the first two."""
+    import tempfile
+    ids = ["A", "B", "C"]
+    state_dir = Path(tempfile.mkdtemp())
+    store_dir = Path(tempfile.mkdtemp())
+    refs = [PromptRef(i, "1.0.0", {"topic": "AI"}) for i in ids]
+    label = "q3-suspend"
+
+    cfg = CollectorConfig(state_dir=state_dir, store_dir=store_dir, quota_limit=2)
+    a1 = FakeBrowserAdapter()
+    col1 = GrokCollector(a1, _make_multi_registry(ids), cfg, refs, label)
+    res1 = asyncio.run(col1.run_collection())
+    assert res1.status == CollectionStatus.SUSPENDED
+    assert res1.prompts_completed == 2
+    assert a1.submits == ["Survey AI.", "Survey AI."]  # only 2 submitted
+    assert len(EvidenceStore(store_dir).records_for(col1.collection_id)) == 2
+
+    # Second run resumes: 2 already-done are skipped+rehydrated, C collected.
+    a2 = FakeBrowserAdapter()
+    col2 = GrokCollector(a2, _make_multi_registry(ids), cfg, refs, label)
+    res2 = asyncio.run(col2.run_collection())
+    assert res2.status == CollectionStatus.SUCCESS
+    assert res2.prompts_completed == 1   # only C this run
+    assert res2.prompts_skipped == 2     # A, B already done
+    assert res2.records_persisted == 2   # A, B rehydrated
+    assert a2.submits == ["Survey AI."]  # only C submitted
+    # Full evidence present, no duplicates.
+    assert len(res2.records) == 3
+    assert len(EvidenceStore(store_dir).records_for(col2.collection_id)) == 3
+
+
+def test_q3_quota_zero_suspends_immediately():
+    import tempfile
+    ids = ["A"]
+    cfg = CollectorConfig(state_dir=Path(tempfile.mkdtemp()),
+                          store_dir=Path(tempfile.mkdtemp()), quota_limit=0)
+    refs = [PromptRef("A", "1.0.0", {"topic": "AI"})]
+    adapter = FakeBrowserAdapter()
+    col = GrokCollector(adapter, _make_multi_registry(ids), cfg, refs, "q3-zero")
+    res = asyncio.run(col.run_collection())
+    assert res.status == CollectionStatus.SUSPENDED
+    assert res.prompts_completed == 0
+    assert adapter.submits == []  # nothing submitted
+
+
+def test_q3_negative_quota_rejected():
+    import pytest as _pytest
+    with _pytest.raises(ValueError):
+        CollectorConfig(quota_limit=-1)
 
 
 if __name__ == "__main__":

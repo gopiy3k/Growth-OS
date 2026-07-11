@@ -32,9 +32,18 @@ class CollectorConfig:
     endpoint: str = DEFAULT_ENDPOINT
     completion_timeout: float = DEFAULT_COMPLETION_TIMEOUT
     transport_retry_limit: int = DEFAULT_TRANSPORT_RETRY_LIMIT
+    # Q3: hard ceiling on prompts COLLECTED per run. When reached the collector
+    # stops and returns SUSPENDED (resumable) — never FAILED. None = unbounded.
     quota_limit: Optional[int] = None
     # Where resume markers live; defaults into the collector data tree.
     state_dir: Optional[Path] = None
+    # Where raw evidence records are persisted (Q1); defaults into collector tree.
+    store_dir: Optional[Path] = None
+    # Where normalized evidence + OD contract artifacts are written (Q2/Q5).
+    artifact_dir: Optional[Path] = None
+    # Where the OD intake drop zone lives (Q5, design §16). Defaults into the
+    # collector data tree; the collector never writes OD internal state.
+    intake_dir: Optional[Path] = None
     # Override conversation_id when the runtime supplies it out-of-band.
     conversation_id: Optional[str] = None
 
@@ -43,6 +52,8 @@ class CollectorConfig:
             raise ValueError("completion_timeout must be > 0")
         if self.transport_retry_limit < 0:
             raise ValueError("transport_retry_limit must be >= 0")
+        if self.quota_limit is not None and self.quota_limit < 0:
+            raise ValueError("quota_limit must be >= 0 or None (unbounded)")
 
 
 __all__ = ["CollectorConfig", "DEFAULT_ENDPOINT"]

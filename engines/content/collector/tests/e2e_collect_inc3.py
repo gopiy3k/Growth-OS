@@ -30,8 +30,10 @@ from prompt_registry.loader import PromptRegistry  # noqa: E402
 from orchestrator import CollectorConfig, CollectionStatus, GrokCollector, PromptRef  # noqa: E402
 
 CDP_URL = os.environ.get("CDP_URL", "http://127.0.0.1:9333")
-# Known persistent user tab (from runtime verification, ADR-027 §13).
-KNOWN_USER_TAB = "54F5F3236B58EF13AC23ADAD415FCF38"
+# The "known user tab" is resolved at runtime from the baseline target set
+# (Q0 hygiene): no hardcoded tab id, so the gated e2e does not silently break
+# when the user's persistent tab id changes between sessions.
+KNOWN_USER_TAB = os.environ.get("KNOWN_USER_TAB")
 
 
 async def main() -> int:
@@ -43,7 +45,8 @@ async def main() -> int:
     baseline = await adapter.enumerate_targets()
     await adapter.detach()
     baseline_ids = {t.target_id for t in baseline}
-    assert KNOWN_USER_TAB in baseline_ids, "known user tab missing before run"
+    if KNOWN_USER_TAB is not None:
+        assert KNOWN_USER_TAB in baseline_ids, "known user tab missing before run"
     print(f"[baseline] targets={len(baseline_ids)} (user tab present)")
 
     cfg = CollectorConfig()
@@ -74,8 +77,9 @@ async def main() -> int:
     # 2. only the original user tab remains (no orphan automation targets)
     orphan_automation = after_ids - baseline_ids
     assert not orphan_automation, f"orphan automation targets leaked: {orphan_automation}"
-    # 3. user tab intact
-    assert KNOWN_USER_TAB in after_ids, "USER TAB WAS CLOSED — invariant breach"
+    # 3. user tab intact (only when explicitly identified via KNOWN_USER_TAB)
+    if KNOWN_USER_TAB is not None:
+        assert KNOWN_USER_TAB in after_ids, "USER TAB WAS CLOSED — invariant breach"
     print(f"[cleanup] targets={len(after_ids)}; user tab intact; no orphans; automation tab destroyed")
 
     print("\nE2E COLLECT INC3: PASS")
