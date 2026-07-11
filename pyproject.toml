@@ -14,7 +14,12 @@ keywords = ["ai", "orchestration", "queue", "workers", "agents", "platform"]
 dependencies = ["requests>=2.28"]
 
 [project.optional-dependencies]
-dev = ["pytest>=7", "gitleaks; sys_platform != 'win32'"]
+# Note: `gitleaks` is intentionally NOT a pip dependency. Gitleaks is a Go binary
+# distributed via GitHub releases, not PyPI (there is no `gitleaks` package on PyPI),
+# so `pip install gitleaks` fails on non-win32 CI runners and broke the `contract`
+# job. Secret scanning is covered by the `gitleaks/gitleaks-action@v2` GitHub Action
+# in ci.yml (the `secret-scan` job), which needs no Python dependency.
+dev = ["pytest>=7"]
 
 [tool.setuptools.packages.find]
 where = ["."]
