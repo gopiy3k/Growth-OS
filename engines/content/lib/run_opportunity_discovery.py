@@ -43,7 +43,10 @@ for _p in (_LIB, _SHARED):
         sys.path.insert(0, _p)
 
 import eos_queue as ce_queue  # noqa: E402  (FROZEN EOS contract)
-import editorial_memory as em  # noqa: E402  (observability: cycle record)
+try:
+    import editorial_memory as em  # noqa: E402  (observability: cycle record)
+except Exception:  # noqa: BLE001  (module is optional PO-WIP; observability is best-effort)
+    em = None  # wrappers below already treat any failure (incl. AttributeError) as non-fatal
 import collector_signal  # noqa: E402  (read-only bridge to FROZEN collector drop-zone)
 
 ENGINE = "content"

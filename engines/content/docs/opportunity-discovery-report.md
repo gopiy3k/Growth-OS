@@ -59,9 +59,12 @@ job. Zero frozen modules modified. No new Stage / schema / queue.
 
 ## 3. Validation evidence (real, not mocked)
 
-- **Real RC3 fixture:** `engines/content/collector/data/opportunity-intake/2026-07-11.jsonl`
-  — 11 records, 8978 bytes (genuine Grok trend output, handles `@aiseomastery`, `@Mayank_Msd`,
-  `@auxten`; collection_id `55d63dd9…`; prompt `PROMPT-TREND-SCAN@1.2.0`).
+- **Genuine RC3 collector intake:** `engines/content/collector/data/rc3/intake/2026-07-11.jsonl`
+  — 1 record (genuine Grok trend output; collection_id `55d63dd9…`; prompt `PROMPT-TREND-SCAN@1.0.0`;
+  real handles `@aiseomastery`, `@Mayank_Msd`, `@auxten`). Consumed by OD via `COLLECTOR_INTAKE_DIR`.
+- **Synthetic test fixture (quarantined):** `engines/content/collector/tests/fixtures/opportunity-intake/2026-07-11.fake.jsonl`
+  — NOT real evidence. Refused by the `collector_signal` production guard (TP-003). Used only by
+  `test_production_path_refuses_synthetic_fixtures`.
 - **Test suite:** `python -m pytest engines/content/lib/tests/test_opportunity_discovery.py`
   → **6 passed** (driver enqueue shape, idempotent dedup, real-fixture contract, empty-intake safety).
 - **Driver smoke:** against the real drop-zone, `discover_once` enqueues 11 with 0 dup on first run,
