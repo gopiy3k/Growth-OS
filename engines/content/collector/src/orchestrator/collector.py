@@ -103,6 +103,9 @@ class GrokCollector:
         self._state_dir = config.state_dir
         self._resume = ResumeState(self.collection_id, self._state_dir)
         self._url_by_target: dict[str, str] = {}
+        # Diagnostic: the automation tab opened for this run (opaque to the
+        # orchestrator; exposed read-only for cleanup verification/tests).
+        self.automation_tab_id: Optional[str] = None
 
     async def run_collection(self) -> CollectionResult:
         result = CollectionResult(
@@ -116,6 +119,7 @@ class GrokCollector:
             await self.adapter.attach()
             # OPEN_TAB (new automation tab only — ADR-027 §6)
             tab = await self.adapter.new_tab()
+            self.automation_tab_id = tab.target_id
             # AUTH_VERIFY (navigate + assert auth) — interaction failure here is
             # a real stop-and-report, not a transport glitch (adapter retries
             # transport internally); convert to FAILED status via the handler.
