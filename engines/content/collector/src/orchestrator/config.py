@@ -32,10 +32,8 @@ class CollectorConfig:
     endpoint: str = DEFAULT_ENDPOINT
     completion_timeout: float = DEFAULT_COMPLETION_TIMEOUT
     transport_retry_limit: int = DEFAULT_TRANSPORT_RETRY_LIMIT
-    # NOTE (Q0 hygiene): reserved for Increment 4. The orchestrator does not
-    # read this today — the adapter owns its own internal transport-retry loop.
-    # It is retained (and validated) so Q3 quota/transport policy can consume it
-    # without an API change. Not wired into orchestrator logic yet.
+    # Q3: hard ceiling on prompts COLLECTED per run. When reached the collector
+    # stops and returns SUSPENDED (resumable) — never FAILED. None = unbounded.
     quota_limit: Optional[int] = None
     # Where resume markers live; defaults into the collector data tree.
     state_dir: Optional[Path] = None
@@ -51,6 +49,8 @@ class CollectorConfig:
             raise ValueError("completion_timeout must be > 0")
         if self.transport_retry_limit < 0:
             raise ValueError("transport_retry_limit must be >= 0")
+        if self.quota_limit is not None and self.quota_limit < 0:
+            raise ValueError("quota_limit must be >= 0 or None (unbounded)")
 
 
 __all__ = ["CollectorConfig", "DEFAULT_ENDPOINT"]

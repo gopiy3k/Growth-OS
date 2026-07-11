@@ -166,6 +166,12 @@ class GrokCollector:
                         result.records_persisted += 1
                     result.prompts_skipped += 1
                     continue
+                # Q3: quota guard — if the configured ceiling is reached, stop
+                # and suspend (resumable), never FAILED. The remaining prompts
+                # stay PENDING in resume state so the next run continues.
+                if self._quota_exhausted(result):
+                    result.finish(CollectionStatus.SUSPENDED)
+                    return result
                 try:
                     await self._collect_one(tab, ref, result, browser_metadata)
                 except BrowserAdapterError as e:
@@ -250,6 +256,20 @@ class GrokCollector:
         """Record a terminal failure and set status (single error-format path)."""
         result.error = f"{type(exc).__name__}: {exc}"
         result.finish(status)
+
+    def _quota_exhausted(self, result: CollectionResult) -> bool:
+        """Q3: True when a configured quota_limit has been reached by prompts
+        collected so far this run (plus those resumed from prior runs would
+        over-consume). Quota exhaustion is resumable -> SUSPENDED, never FAILED.
+        Returns False when quota_limit is None (unbounded)."""
+        limit = self.config.quota_limit
+        if limit is None:
+            return False
+        # Count prompts that consumed quota: completed this run + skipped-done
+        # (already counted against quota on their original run) would double
+        # count, so we base the ceiling only on prompts collected this run.
+        consumed = result.prompts_completed
+        return consumed >= limit
 
     async def _safe_close(self, tab: TabHandle) -> None:
         # Best-effort under normal failure AND under cancellation: a shielded
