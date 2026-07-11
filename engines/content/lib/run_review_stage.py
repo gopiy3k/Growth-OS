@@ -159,6 +159,13 @@ def _normalize(parsed: dict, model: Optional[str], payload: dict, policy: dict) 
         "draft_title": str(payload.get("draft_title", "")),
         "draft_body": str(payload.get("draft_body", "")),
         "tone": str(payload.get("tone", "")),
+        # Provenance preservation (ENGINE-009): land the collector evidence contract in
+        # result_json so the Approved Pool (logical view over content_engine_runs) can
+        # audit the raw collector source back to its artifact. Never invents fields.
+        "raw_evidence_ref": payload.get("raw_evidence_ref"),
+        "record_key": payload.get("record_key"),
+        "collector_version": payload.get("collector_version"),
+        "endpoint": payload.get("endpoint"),
     }
     if model:
         result["model_version"] = model
