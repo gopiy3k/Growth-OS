@@ -43,7 +43,29 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITLEAKS_ENABLE_UPLOAD: "false"
+      # Deterministic OSS Gitleaks install (no wrapper action, no license required).
+      # Replaces the floating gitleaks/gitleaks-action@v2 tag, which now resolves to a
+      # commercial-license-gated build that fails before scanning (infra regression, not a
+      # repo secret). Pinned version keeps the scan reproducible and license-free.
+      - name: Install Gitleaks (OSS binary)
+        run: |
+          GITLEAKS_VERSION="8.24.3"
+          ARCH="linux_x64"
+          curl -sSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_${ARCH}.tar.gz" \
+            -o /tmp/gitleaks.tar.gz
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp
+          sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+          gitleaks version
+      - name: Run Gitleaks secret scan
+        run: |
+          gitleaks detect \
+            --source . \
+            --report-format sarif \
+            --report-path gitleaks.sarif \
+            --no-banner
+      - name: Upload Gitleaks SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: gitleaks.sarif
+          category: gitleaks
