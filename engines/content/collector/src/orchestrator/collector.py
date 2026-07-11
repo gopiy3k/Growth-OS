@@ -116,10 +116,17 @@ class GrokCollector:
             await self.adapter.attach()
             # OPEN_TAB (new automation tab only — ADR-027 §6)
             tab = await self.adapter.new_tab()
-            # AUTH_VERIFY (navigate + assert auth)
-            endpoint = self.config.endpoint
-            await self.adapter.navigate(tab, endpoint)
-            await self.adapter.verify_auth(tab)
+            # AUTH_VERIFY (navigate + assert auth) — interaction failure here is
+            # a real stop-and-report, not a transport glitch (adapter retries
+            # transport internally); convert to FAILED status via the handler.
+            try:
+                endpoint = self.config.endpoint
+                await self.adapter.navigate(tab, endpoint)
+                await self.adapter.verify_auth(tab)
+            except BrowserAdapterError as e:
+                result.error = f"{type(e).__name__}: {e}"
+                result.finish(CollectionStatus.FAILED)
+                return result
 
             # CONV_SETUP: derive conversation_id ONLY if the runtime exposes it.
             browser_metadata: dict = {}

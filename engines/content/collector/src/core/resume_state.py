@@ -33,7 +33,7 @@ class PromptStatus(str, Enum):
 class ResumeState:
     def __init__(self, collection_id: str, state_dir: Path = DEFAULT_STATE_DIR):
         self.collection_id = collection_id
-        self.state_dir = Path(state_dir)
+        self.state_dir = Path(state_dir) if state_dir else DEFAULT_STATE_DIR
         self.path = self.state_dir / f"{collection_id}.json"
         self._state: dict[str, str] = self._load()
 
